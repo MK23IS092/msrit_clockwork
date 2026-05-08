@@ -13,11 +13,11 @@
 
 ## Demo video
 
-The walkthrough below plays directly in the GitHub README in most desktop browsers. If playback is unavailable in your viewer, use the download link in the [Submission bundle](#submission-bundle) table.
+The walkthrough plays inline below when the README is viewed on GitHub. No download is required: pressing the play control streams the video directly from the repository.
 
-<video controls width="100%" playsinline preload="metadata" src="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/product_demo.mp4">
-  <a href="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/product_demo.mp4">Download product_demo.mp4</a>
-</video>
+<video src="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/product_demo.mp4" controls muted preload="metadata" width="100%"></video>
+
+If your viewer does not render embedded video (some markdown previews and IDE viewers do not), use the [stream / download link](https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/product_demo.mp4) in the [Submission bundle](#submission-bundle) table.
 
 ---
 

@@ -22,7 +22,7 @@ from typing import Awaitable, Callable, Optional
 
 from telegram import Bot, Update
 from telegram.constants import ParseMode
-from telegram.error import TelegramError
+from telegram.error import NetworkError, TelegramError, TimedOut
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -31,23 +31,28 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 
-# Hugging Face Spaces' first outbound call to api.telegram.org can take longer
-# than python-telegram-bot's default 5s timeout. We use generous timeouts so
-# cold-start does not trip start_polling.
+# Hugging Face Spaces can experience >30s spikes when reaching api.telegram.org
+# (cold-start, transient network blips). We use generous timeouts so neither
+# start_polling nor individual sendMessage calls trip the default 5s timeout.
 _HTTP_REQUEST_KW = dict(
-    connect_timeout=30.0,
-    read_timeout=30.0,
-    write_timeout=30.0,
-    pool_timeout=10.0,
+    connect_timeout=60.0,
+    read_timeout=60.0,
+    write_timeout=60.0,
+    pool_timeout=20.0,
 )
 _GETUPDATES_REQUEST_KW = dict(
-    connect_timeout=30.0,
+    connect_timeout=60.0,
     # Long polling: Telegram holds the request open up to 50s, so read_timeout
     # must exceed that.
-    read_timeout=70.0,
-    write_timeout=30.0,
-    pool_timeout=10.0,
+    read_timeout=80.0,
+    write_timeout=60.0,
+    pool_timeout=20.0,
 )
+# Per-call retry policy for outbound sends initiated by command handlers and
+# broadcast helpers. With 3 attempts and exponential backoff, a transient HF
+# network stall of up to ~15s is fully recoverable.
+_SEND_MAX_ATTEMPTS = 3
+_SEND_INITIAL_BACKOFF = 1.5
 
 import config
 
@@ -162,6 +167,7 @@ class TelegramBot:
                 self._app.add_handler(CommandHandler("trends", self._cmd_trends))
                 self._app.add_handler(CommandHandler("pipelines", self._cmd_pipelines))
                 self._app.add_handler(CommandHandler("unsubscribe", self._cmd_unsubscribe))
+                self._app.add_error_handler(self._on_telegram_error)
 
                 await self._app.initialize()
                 await self._app.start()
@@ -247,6 +253,63 @@ class TelegramBot:
         if pipelines is not None:
             self._pipelines_provider = pipelines
 
+    # ── error handler & resilient send ───────────────────────
+
+    async def _on_telegram_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Swallow expected transient errors so they don't surface as tracebacks."""
+        err = context.error
+        if isinstance(err, (TimedOut, NetworkError)):
+            logger.warning("Telegram transient error: %s", err)
+            return
+        logger.error("Telegram handler error: %s", err)
+
+    async def _safe_send(
+        self,
+        bot,
+        chat_id: int | str,
+        text: str,
+        parse_mode: Optional[str] = ParseMode.HTML,
+        disable_web_page_preview: bool = True,
+    ) -> bool:
+        """send_message with bounded retry on TimedOut / NetworkError.
+
+        Returns True on success. On terminal failure we log and return False
+        so command handlers don't propagate exceptions to the user.
+        """
+        attempt = 0
+        backoff = _SEND_INITIAL_BACKOFF
+        last_error: Optional[Exception] = None
+        while attempt < _SEND_MAX_ATTEMPTS:
+            attempt += 1
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=disable_web_page_preview,
+                )
+                self._sent_count += 1
+                return True
+            except (TimedOut, NetworkError) as e:
+                last_error = e
+                logger.warning(
+                    "Telegram send attempt %s/%s timed out (chat=%s): %s",
+                    attempt, _SEND_MAX_ATTEMPTS, chat_id, e,
+                )
+                if attempt < _SEND_MAX_ATTEMPTS:
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, 8.0)
+            except TelegramError as e:
+                logger.warning("Telegram send to %s failed (non-retryable): %s", chat_id, e)
+                self._failed_count += 1
+                return False
+        logger.error(
+            "Telegram send to %s failed after %s attempts: %s",
+            chat_id, _SEND_MAX_ATTEMPTS, last_error,
+        )
+        self._failed_count += 1
+        return False
+
     # ── command handlers ─────────────────────────────────────
 
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -255,32 +318,26 @@ class TelegramBot:
         if not chat:
             return
         self._upsert_subscriber(chat.id, user.username if user else None)
-        await context.bot.send_message(
-            chat_id=chat.id, text=WELCOME, parse_mode=ParseMode.HTML
-        )
+        await self._safe_send(context.bot, chat.id, WELCOME)
 
     async def _cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat = update.effective_chat
         if not chat:
             return
-        await context.bot.send_message(
-            chat_id=chat.id, text=HELP_MESSAGE, parse_mode=ParseMode.HTML
-        )
+        await self._safe_send(context.bot, chat.id, HELP_MESSAGE)
 
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat = update.effective_chat
         if not chat:
             return
         if not self._stats_provider:
-            await context.bot.send_message(
-                chat_id=chat.id, text="Stats not available right now."
-            )
+            await self._safe_send(context.bot, chat.id, "Stats not available right now.", parse_mode=None)
             return
         try:
             data = await self._stats_provider()
         except Exception as e:
             logger.warning("status provider failed: %s", e)
-            await context.bot.send_message(chat_id=chat.id, text="Stats are temporarily unavailable.")
+            await self._safe_send(context.bot, chat.id, "Stats are temporarily unavailable.", parse_mode=None)
             return
         agents = data.get("agents_status") or {}
         text = (
@@ -294,25 +351,26 @@ class TelegramBot:
             f"reasoning=<b>{agents.get('reasoning', '?')}</b> "
             f"memory=<b>{agents.get('memory', '?')}</b>"
         )
-        await context.bot.send_message(chat_id=chat.id, text=text, parse_mode=ParseMode.HTML)
+        await self._safe_send(context.bot, chat.id, text)
 
     async def _cmd_trends(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat = update.effective_chat
         if not chat:
             return
         if not self._trends_provider:
-            await context.bot.send_message(chat_id=chat.id, text="Trend service is offline.")
+            await self._safe_send(context.bot, chat.id, "Trend service is offline.", parse_mode=None)
             return
         try:
             trends = await self._trends_provider(5)
         except Exception as e:
             logger.warning("trend provider failed: %s", e)
-            await context.bot.send_message(chat_id=chat.id, text="Trends temporarily unavailable.")
+            await self._safe_send(context.bot, chat.id, "Trends temporarily unavailable.", parse_mode=None)
             return
         if not trends:
-            await context.bot.send_message(
-                chat_id=chat.id,
-                text="No trends yet. Trigger an ingestion run from the API and try again.",
+            await self._safe_send(
+                context.bot, chat.id,
+                "No trends yet. Trigger an ingestion run from the API and try again.",
+                parse_mode=None,
             )
             return
         lines = ["<b>Top Trends</b>"]
@@ -322,27 +380,26 @@ class TelegramBot:
                 f"emergence={float(t.get('emergence_score', 0)):.2f} | "
                 f"ETA {t.get('mainstream_eta_months', '?')}mo"
             )
-        await context.bot.send_message(
-            chat_id=chat.id, text="\n".join(lines), parse_mode=ParseMode.HTML
-        )
+        await self._safe_send(context.bot, chat.id, "\n".join(lines))
 
     async def _cmd_pipelines(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat = update.effective_chat
         if not chat:
             return
         if not self._pipelines_provider:
-            await context.bot.send_message(chat_id=chat.id, text="Pipelines service is offline.")
+            await self._safe_send(context.bot, chat.id, "Pipelines service is offline.", parse_mode=None)
             return
         try:
             pipelines = await self._pipelines_provider(5)
         except Exception as e:
             logger.warning("pipeline provider failed: %s", e)
-            await context.bot.send_message(chat_id=chat.id, text="Pipelines temporarily unavailable.")
+            await self._safe_send(context.bot, chat.id, "Pipelines temporarily unavailable.", parse_mode=None)
             return
         if not pipelines:
-            await context.bot.send_message(
-                chat_id=chat.id,
-                text="No pipelines generated yet. Use /api/pipelines/generate.",
+            await self._safe_send(
+                context.bot, chat.id,
+                "No pipelines generated yet. Use /api/pipelines/generate.",
+                parse_mode=None,
             )
             return
         lines = ["<b>Recent Pipelines</b>"]
@@ -355,21 +412,17 @@ class TelegramBot:
             if colab.startswith("https://"):
                 line += f"\n  <a href=\"{colab}\">Open in Colab</a>"
             lines.append(line)
-        await context.bot.send_message(
-            chat_id=chat.id,
-            text="\n".join(lines),
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
+        await self._safe_send(context.bot, chat.id, "\n".join(lines))
 
     async def _cmd_unsubscribe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat = update.effective_chat
         if not chat:
             return
         self._delete_subscriber(chat.id)
-        await context.bot.send_message(
-            chat_id=chat.id,
-            text="You will no longer receive VectorMinds alerts. /start any time to subscribe again.",
+        await self._safe_send(
+            context.bot, chat.id,
+            "You will no longer receive VectorMinds alerts. /start any time to subscribe again.",
+            parse_mode=None,
         )
 
     # ── outbound delivery ─────────────────────────────────────
@@ -384,19 +437,7 @@ class TelegramBot:
             bot = self._outbound_bot
         if bot is None:
             return False
-        try:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
-            self._sent_count += 1
-            return True
-        except TelegramError as e:
-            logger.warning("Telegram send to %s failed: %s", chat_id, e)
-            self._failed_count += 1
-            return False
+        return await self._safe_send(bot, chat_id, text)
 
     async def broadcast(self, text: str) -> int:
         """Send to every subscriber. Returns number of successful deliveries."""
