@@ -20,7 +20,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 
-from telegram import Update
+from telegram import Bot, Update
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
 from telegram.ext import (
@@ -67,6 +67,7 @@ class TelegramBot:
         self._sent_count = 0
         self._failed_count = 0
         self._app: Optional[Application] = None
+        self._outbound_bot: Optional[Bot] = None
         self._polling_started = False
         # Optional callable returning a fresh ``stats`` dict for ``/status``.
         self._stats_provider: Optional[Callable[[], Awaitable[dict]]] = None
@@ -81,11 +82,44 @@ class TelegramBot:
 
     # ── lifecycle ─────────────────────────────────────────────
 
+    async def _ensure_outbound_bot(self) -> bool:
+        """Lightweight Bot client for send_message when polling is disabled."""
+        if not self.enabled:
+            return False
+        if self._outbound_bot is not None:
+            return True
+        try:
+            bot = Bot(self.token)
+            await bot.initialize()
+            self._outbound_bot = bot
+            return True
+        except Exception as e:
+            logger.error("Telegram outbound client init failed: %s", e)
+            return False
+
+    def _send_bot(self) -> Optional[Bot]:
+        if self._app and self._app.bot:
+            return self._app.bot
+        return self._outbound_bot
+
     async def start_polling(self) -> None:
         """Start the long-polling task. Safe to call once; idempotent on retry."""
         if not self.enabled:
             return
         if self._polling_started:
+            return
+        if not config.TELEGRAM_ENABLE_POLLING:
+            if await self._ensure_outbound_bot() and self._outbound_bot:
+                try:
+                    me = await self._outbound_bot.get_me()
+                    logger.info(
+                        "Telegram outbound-only mode (TELEGRAM_ENABLE_POLLING=false): @%s — "
+                        "alerts use sendMessage without getUpdates. If another process polls "
+                        "this token you will still see HTTP 409 Conflict in that process.",
+                        me.username,
+                    )
+                except Exception as e:
+                    logger.warning("Telegram outbound-only: getMe failed: %s", e)
             return
         try:
             self._app = (
@@ -119,19 +153,25 @@ class TelegramBot:
     async def stop_polling(self) -> None:
         """Cleanly stop the polling task. Safe to call multiple times."""
         app = self._app
-        if not app:
-            return
-        try:
-            if app.updater and app.updater.running:
-                await app.updater.stop()
-            if app.running:
-                await app.stop()
-            await app.shutdown()
-        except Exception as e:
-            logger.warning("Telegram bot stop encountered: %s", e)
-        finally:
-            self._app = None
-            self._polling_started = False
+        if app:
+            try:
+                if app.updater and app.updater.running:
+                    await app.updater.stop()
+                if app.running:
+                    await app.stop()
+                await app.shutdown()
+            except Exception as e:
+                logger.warning("Telegram bot stop encountered: %s", e)
+            finally:
+                self._app = None
+                self._polling_started = False
+        if self._outbound_bot is not None:
+            try:
+                await self._outbound_bot.shutdown()
+            except Exception as e:
+                logger.warning("Telegram outbound bot shutdown: %s", e)
+            finally:
+                self._outbound_bot = None
 
     def attach_providers(
         self,
@@ -275,10 +315,17 @@ class TelegramBot:
     # ── outbound delivery ─────────────────────────────────────
 
     async def _send_to(self, chat_id: int | str, text: str) -> bool:
-        if not self.enabled or not self._app:
+        if not self.enabled:
+            return False
+        bot = self._send_bot()
+        if bot is None:
+            if not await self._ensure_outbound_bot():
+                return False
+            bot = self._outbound_bot
+        if bot is None:
             return False
         try:
-            await self._app.bot.send_message(
+            await bot.send_message(
                 chat_id=chat_id,
                 text=text,
                 parse_mode=ParseMode.HTML,
@@ -293,7 +340,9 @@ class TelegramBot:
 
     async def broadcast(self, text: str) -> int:
         """Send to every subscriber. Returns number of successful deliveries."""
-        if not self.enabled or not self._app:
+        if not self.enabled:
+            return 0
+        if self._send_bot() is None and not await self._ensure_outbound_bot():
             return 0
         chat_ids = self._list_subscriber_ids()
         if not chat_ids:
@@ -391,6 +440,7 @@ class TelegramBot:
         return {
             "enabled": self.enabled,
             "polling": self._polling_started,
+            "polling_configured": config.TELEGRAM_ENABLE_POLLING,
             "subscribers": self._subscriber_count(),
             "messages_sent": self._sent_count,
             "messages_failed": self._failed_count,
