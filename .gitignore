@@ -18,5 +18,8 @@ android/**/build/
 .env
 backend/.env
 
-# Built APKs (staged locally for sharing; CI artifacts/releases are the source of truth)
+# Built APKs: ignore stray builds at the repo root, but keep the curated
+# judge-ready APK that lives in dist/ tracked so reviewers always have one
+# without needing to run CI.
 *.apk
+!dist/*.apk
