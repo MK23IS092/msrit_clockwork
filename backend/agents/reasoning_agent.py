@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import random
 from datetime import datetime
 from typing import Optional
 
@@ -214,71 +213,115 @@ class ReasoningAgent(BaseAgent):
         Returns:
             Formatted technical brief text
         """
-        if config.USE_MOCK_LLM or not config.GROQ_API_KEY:
+        if config.USE_MOCK_LLM or not config.LLM_API_KEY:
             return self._generate_mock_brief(technique)
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
+                prompt = (
+                    "You are a senior AI research analyst at VectorMinds. "
+                    "Generate a structured technical brief for an emerging AI technique. "
+                    "Include: core technique description, key insight, why it matters, "
+                    "what it enables, what it competes with, and 12-month impact prediction.\n\n"
+                    f"Technique: {technique}\n\n"
+                    f"Context from recent papers:\n{context[:2000]}"
+                )
                 resp = await client.post(
-                    f"{config.GROQ_BASE_URL}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {config.GROQ_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
+                    f"{config.GEMINI_BASE_URL}/models/{config.LLM_MODEL}:generateContent",
+                    params={"key": config.LLM_API_KEY},
+                    headers={"Content-Type": "application/json"},
                     json={
-                        "model": config.LLM_MODEL,
-                        "messages": [
-                            {
-                                "role": "system",
-                                "content": (
-                                    "You are a senior AI research analyst at VectorMinds. "
-                                    "Generate a structured technical brief for an emerging "
-                                    "AI technique. Include: core technique description, "
-                                    "key insight, why it matters, what it enables, "
-                                    "what it competes with, and 12-month impact prediction."
-                                ),
-                            },
-                            {
-                                "role": "user",
-                                "content": (
-                                    f"Generate a technical brief for: {technique}\n\n"
-                                    f"Context from recent papers:\n{context[:2000]}"
-                                ),
-                            },
-                        ],
-                        "max_tokens": 1000,
-                        "temperature": 0.7,
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {
+                            "temperature": 0.7,
+                            "maxOutputTokens": 4096,
+                        },
                     },
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                return data["choices"][0]["message"]["content"]
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    raise ValueError("No Gemini candidates returned")
+                parts = candidates[0].get("content", {}).get("parts", [])
+                text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+                if not text:
+                    raise ValueError("Empty Gemini response text")
+                return text
         except Exception as e:
             logger.error(f"LLM brief generation failed: {e}")
             return self._generate_mock_brief(technique)
 
     def _extract_technique_key(self, title: str, categories: list) -> str:
-        """Extract a technique cluster key from title and categories."""
-        title_lower = title.lower()
+        """Extract a technique cluster key from title and categories.
 
-        # Common technique keywords to cluster by
+        Priority:
+        1. Match a curated keyword list against the title.
+        2. Match against descriptive category tokens (skipping arXiv class codes
+           like ``cs.LG`` and source labels like ``arxiv``/``blog``).
+        3. Fallback to ``General AI`` so we never surface an internal source label
+           as a "technique".
+        """
+        title_lower = (title or "").lower()
+
         keywords = [
-            "transformer", "attention", "diffusion", "gan", "rlhf",
-            "reinforcement", "graph neural", "federated", "quantization",
-            "pruning", "distillation", "moe", "mixture", "rag", "retrieval",
-            "lora", "fine-tun", "vision", "multimodal", "agent",
-            "state space", "mamba", "language model", "llm",
-            "embedding", "contrastive", "self-supervised",
+            ("transformer", "Transformer Architectures"),
+            ("attention", "Attention Mechanisms"),
+            ("diffusion", "Diffusion Models"),
+            ("rlhf", "RLHF Alignment"),
+            ("reinforcement", "Reinforcement Learning"),
+            ("graph neural", "Graph Neural Networks"),
+            ("federated", "Federated Learning"),
+            ("quantization", "Quantization"),
+            ("pruning", "Model Pruning"),
+            ("distillation", "Knowledge Distillation"),
+            ("mixture of experts", "Mixture of Experts"),
+            ("moe", "Mixture of Experts"),
+            ("retrieval-augmented", "Retrieval-Augmented Generation"),
+            ("rag", "Retrieval-Augmented Generation"),
+            ("lora", "LoRA / Adapter Tuning"),
+            ("fine-tun", "Parameter-Efficient Fine-Tuning"),
+            ("multimodal", "Multimodal Models"),
+            ("vision-language", "Vision-Language Models"),
+            ("vision language", "Vision-Language Models"),
+            ("vision", "Vision Models"),
+            ("agent", "AI Agents"),
+            ("state space", "State Space Models"),
+            ("mamba", "State Space Models"),
+            ("language model", "Large Language Models"),
+            ("llm", "Large Language Models"),
+            ("embedding", "Embedding Models"),
+            ("contrastive", "Contrastive Learning"),
+            ("self-supervised", "Self-Supervised Learning"),
+            ("gan", "Generative Adversarial Networks"),
+            ("speech", "Speech Models"),
+            ("audio", "Audio Models"),
         ]
 
-        for kw in keywords:
+        for kw, label in keywords:
             if kw in title_lower:
-                return kw.replace(" ", "_").title()
+                return label
 
-        # Fallback to primary category
+        # Categories: ignore arXiv class codes (e.g. cs.LG) and source labels.
+        IGNORE_CATEGORY_LABELS = {
+            "arxiv", "github", "patents", "patent", "startup", "startups",
+            "social", "blog", "blogs", "hacker-news", "rss",
+        }
         if categories:
-            return categories[0] if isinstance(categories[0], str) else str(categories[0])
-        return "general_ai"
+            for cat in categories:
+                if not isinstance(cat, str):
+                    continue
+                low = cat.lower().strip()
+                if not low:
+                    continue
+                if low in IGNORE_CATEGORY_LABELS:
+                    continue
+                # Skip arXiv subject codes such as cs.LG / stat.ML.
+                if "." in low and len(low) <= 8 and low.split(".")[0].isalpha():
+                    continue
+                return cat.replace("-", " ").title()
+
+        return "General AI"
 
     def _compute_emergence_score(
         self,
@@ -304,19 +347,15 @@ class ReasoningAgent(BaseAgent):
         base = avg_novelty * 0.4
         volume_signal = min(1.0, signal_count / 15) * 0.3
         community_signal = min(1.0, github_stars / 3000) * 0.3
-        noise = random.uniform(-0.05, 0.05)
-        return max(0.0, min(1.0, base + volume_signal + community_signal + noise))
+        return max(0.0, min(1.0, base + volume_signal + community_signal))
 
     def _estimate_eta(self, impact_score: float) -> int:
-        """Estimate months until mainstream adoption."""
-        if impact_score > 0.8:
-            return random.randint(3, 6)
-        elif impact_score > 0.6:
-            return random.randint(6, 12)
-        elif impact_score > 0.4:
-            return random.randint(12, 18)
-        else:
-            return random.randint(18, 36)
+        """Estimate deterministic mainstream horizon buckets (6/12/24 months)."""
+        if impact_score >= 0.75:
+            return 6
+        if impact_score >= 0.5:
+            return 12
+        return 24
 
     def _assess_risks(self, signals: list[dict]) -> list[str]:
         """Generate risk factors for a technique cluster."""

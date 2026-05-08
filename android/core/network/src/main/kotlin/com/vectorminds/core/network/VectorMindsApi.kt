@@ -14,14 +14,23 @@ interface VectorMindsApi {
     @GET("api/stats")
     suspend fun getStats(): StatsResponse
 
+    @GET("api/dashboard/premium-context")
+    suspend fun getDashboardPremiumContext(): DashboardPremiumContextResponse
+
     @POST("api/ingest")
     suspend fun triggerIngestion(@Body request: IngestRequest): IngestResponse
+
+    @GET("api/ingest/status")
+    suspend fun getIngestionStatus(): IngestionStatus
 
     @GET("api/trends")
     suspend fun getTrends(@Query("limit") limit: Int = 20): TrendsResponse
 
     @GET("api/trends/{trendId}")
-    suspend fun getTrendDetail(@Path("trendId") trendId: String): TrendDetail
+    suspend fun getTrendDetail(
+        @Path("trendId") trendId: String,
+        @Query("include_brief") includeBrief: Boolean = false,
+    ): TrendDetail
 
     @POST("api/blueprints/generate")
     suspend fun generateBlueprint(@Body request: BlueprintRequest): BlueprintResponse
@@ -34,6 +43,9 @@ interface VectorMindsApi {
 
     @POST("api/pipelines/generate")
     suspend fun generatePipeline(@Body request: PipelineRequest): PipelineResponse
+
+    @POST("api/pipelines/dataset-candidates")
+    suspend fun getDatasetCandidates(@Body request: DatasetCandidatesRequest): DatasetCandidatesResponse
 
     @GET("api/pipelines")
     suspend fun listPipelines(): PipelinesListResponse

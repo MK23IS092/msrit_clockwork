@@ -19,48 +19,89 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.vectormind.app.ui.dashboard.components.*
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.vectorminds.app.ui.dashboard.components.*
 import com.vectorminds.app.ui.theme.*
+import com.vectorminds.core.data.db.entity.ActionLogEntity
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
-    viewModel: DashboardViewModel,
+    viewModel: DashboardViewModel = hiltViewModel(),
     onNavigateToTrends: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val galaxyPoints = remember { generateMockGalaxyPoints() }
+    val galaxyPoints = remember(uiState.galaxyPoints) {
+        if (uiState.galaxyPoints.isNotEmpty()) {
+            // Cap to 30 points — the Galaxy renders an outer glow + core
+            // circle per point each frame, plus relationship lines. Keeping
+            // it under 30 keeps the first frame well under 16ms even on a
+            // software-renderer emulator.
+            uiState.galaxyPoints.take(30).map { point ->
+                GalaxyPoint(
+                    x = point.x.toFloat(),
+                    y = point.y.toFloat(),
+                    label = point.title,
+                    category = point.source,
+                    score = point.noveltyScore.toFloat(),
+                )
+            }
+        } else {
+            generateMockGalaxyPoints()
+        }
+    }
 
-    Column(
+    // Defer the heavy ResearchGalaxy Canvas (two infinite transitions +
+    // up to 30 points + 50 starfield stars) until AFTER the first frame
+    // is on screen, so the splash dismisses immediately.
+    var galaxyReady by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(150)
+        galaxyReady = true
+    }
+
+    Scaffold(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0F0F1A))
-    ) {
-        TopAppBar(
-            title = { Text("VectorMind", color = Color.White, fontWeight = FontWeight.Bold) },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-        )
-
+            .background(Color(0xFF0F0F1A)),
+        containerColor = Color(0xFF0F0F1A),
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        "VectorMind",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                    )
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF0F0F1A),
+                )
+            )
+        }
+    ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(innerPadding)
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             // Situation Model (Phase 11 Integration)
             item {
                 SituationModelPanel(
-                    location = "Samsung R&D Lab",
-                    focus = "Diffusion Transformers",
-                    nextMeeting = "Dr. Arxiv: GNN Architectures @ 2:00 PM"
+                    location = uiState.situationLocation,
+                    focus = uiState.situationFocus,
+                    nextMeeting = uiState.situationMeeting
                 )
             }
 
             // Proactive Author Alert
             item {
                 AuthorAlertCard(
-                    authorName = "Dr. Arxiv",
-                    papersCount = 4,
-                    onViewBrief = { /* TODO */ }
+                    authorName = uiState.authorName,
+                    papersCount = uiState.authorPapersCount,
+                    onViewBrief = onNavigateToTrends
                 )
             }
 
@@ -75,15 +116,27 @@ fun DashboardScreen(
                 }
             }
 
-            // Research Galaxy 3.0
+            // Research Galaxy 3.0 — heavy Canvas, gated behind a 150ms
+            // delay so the first frame can paint before the infinite
+            // transitions kick in.
             item {
                 Text(
-                    "Research Galaxy", 
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), 
+                    "Research Galaxy",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = CyanPrimary
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                ResearchGalaxy(galaxyPoints)
+                if (galaxyReady) {
+                    ResearchGalaxy(galaxyPoints)
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(280.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF050510))
+                    )
+                }
             }
 
             // Action Log Header
@@ -99,16 +152,18 @@ fun DashboardScreen(
             items(uiState.agentLogs.take(5)) { log ->
                 Column(modifier = Modifier.fillMaxWidth()) {
                     ActionLogItem(log)
-                    if (log.contains("brief") || log.contains("Author")) {
+                    if (log.description.contains("brief", ignoreCase = true) ||
+                        log.description.contains("author", ignoreCase = true)
+                    ) {
                         Spacer(modifier = Modifier.height(8.dp))
                         ReasoningPanel(
-                            contextLabel = "Researcher Sync",
-                            confidence = 0.96f,
-                            reasoningPoints = listOf(
-                                "Meeting 'GNN Discussion' starts in 15 mins",
-                                "Attendee 'Dr. Arxiv' is a high-impact author",
-                                "Semantic match with 4 newly ingested signals"
-                            )
+                            contextLabel = uiState.situationFocus,
+                            confidence = uiState.reasoningConfidence.coerceIn(0f, 1f),
+                            reasoningPoints = if (uiState.reasoningPoints.isNotEmpty()) {
+                                uiState.reasoningPoints
+                            } else {
+                                listOf("Awaiting backend intelligence context...")
+                            }
                         )
                     }
                 }
@@ -123,11 +178,34 @@ fun DashboardScreen(
                     enabled = !uiState.isIngesting
                 ) {
                     if (uiState.isIngesting) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Ingesting…", fontWeight = FontWeight.Bold, color = Color.White)
                     } else {
                         Icon(Icons.Default.AutoMode, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Autonomous Ingestion Sync", fontWeight = FontWeight.Bold)
+                    }
+                }
+                if (uiState.lastIngestionResult.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFF1E1E2E).copy(alpha = 0.6f),
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text(
+                            uiState.lastIngestionResult,
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.LightGray,
+                        )
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
@@ -164,7 +242,7 @@ fun StatCard(modifier: Modifier, icon: ImageVector, label: String, value: String
 }
 
 @Composable
-fun ActionLogItem(log: String) {
+fun ActionLogItem(log: ActionLogEntity) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2E).copy(alpha = 0.6f)),
@@ -178,10 +256,12 @@ fun ActionLogItem(log: String) {
                 modifier = Modifier
                     .size(6.dp)
                     .clip(RoundedCornerShape(3.dp))
-                    .background(if (log.contains("Success") || log.contains("complete")) SuccessGreen else WarningAmber)
+                    .background(
+                        if (log.status == "success") SuccessGreen else WarningAmber
+                    )
             )
             Spacer(modifier = Modifier.width(12.dp))
-            Text(log, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+            Text(log.description, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
         }
     }
 }

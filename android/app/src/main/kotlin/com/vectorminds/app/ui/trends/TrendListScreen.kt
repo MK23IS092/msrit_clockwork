@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.*
@@ -14,9 +15,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.vectorminds.app.ui.common.OnResumeEffect
 import com.vectorminds.app.ui.theme.*
 import com.vectorminds.core.network.TrendItem
 
@@ -27,22 +30,31 @@ fun TrendListScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    OnResumeEffect { viewModel.refreshIfIdle() }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0F0F1A))
             .padding(16.dp)
     ) {
-        Text(
-            "Trend Leaderboard",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            "Emerging AI techniques ranked by hourly impact",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Trend Leaderboard",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "Emerging AI techniques ranked by hourly impact",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = { viewModel.loadTrends() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh trends", tint = CyanPrimary)
+            }
+        }
         
         Spacer(modifier = Modifier.height(12.dp))
         
@@ -54,7 +66,12 @@ fun TrendListScreen(
             FilterChip(selected = true, onClick = {}, label = { Text("All Sources") })
             FilterChip(selected = false, onClick = {}, label = { Text("arXiv") })
             FilterChip(selected = false, onClick = {}, label = { Text("GitHub") })
-            FilterChip(selected = false, onClick = { /* Patent implementation in Phase 2 */ }, label = { Text("Patents") })
+            FilterChip(
+                selected = false,
+                onClick = {},
+                enabled = false,
+                label = { Text("Patents (Soon)") },
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -101,14 +118,20 @@ fun TrendListScreen(
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        "No trends yet",
+                        if (uiState.error != null) "Couldn't load trends" else "No trends yet",
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        "Run an ingestion from the Dashboard to discover trends",
+                        uiState.error ?: "Run an ingestion from the Dashboard to discover trends",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedButton(onClick = { viewModel.loadTrends() }) {
+                        Icon(Icons.Default.Refresh, null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Retry")
+                    }
                 }
             }
         } else {

@@ -97,7 +97,24 @@ fun VectorMindsNavGraph(
                 arguments = listOf(navArgument("trendId") { type = NavType.StringType })
             ) { backStackEntry ->
                 val trendId = backStackEntry.arguments?.getString("trendId") ?: ""
-                TrendDetailScreen(trendId = trendId, onBack = { navController.popBackStack() })
+                TrendDetailScreen(
+                    trendId = trendId,
+                    onBack = { navController.popBackStack() },
+                    onShowBlueprints = {
+                        navController.navigate(Screen.Blueprints.route) {
+                            popUpTo(Screen.Dashboard.route) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    onShowPipelines = {
+                        navController.navigate(Screen.Pipelines.route) {
+                            popUpTo(Screen.Dashboard.route) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
             }
             composable(Screen.Blueprints.route) {
                 BlueprintScreen()

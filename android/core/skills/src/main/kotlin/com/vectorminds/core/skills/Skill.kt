@@ -13,15 +13,6 @@ interface Skill {
     suspend fun execute(state: PlatformState): SkillResult
 }
 
-sealed class SkillResult {
-    data class Success(
-        val description: String,
-        val reasoning: List<String> = emptyList()
-    ) : SkillResult()
-
-    data class Failure(val error: String) : SkillResult()
-}
-
 /**
  * Platform state passed to skills on every agent cycle.
  */

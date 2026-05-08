@@ -1,0 +1,19 @@
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Android/Gradle local artifacts
+.gradle/
+android/.gradle/
+android/local.properties
+android/**/build/
+
+# IDE
+.idea/
+.vscode/
+
+# Environment files
+.env
+backend/.env

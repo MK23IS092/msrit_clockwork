@@ -14,8 +14,12 @@ from agents.base_agent import BaseAgent
 from embeddings.engine import EmbeddingEngine
 from embeddings.vector_store import VectorStore
 from ingestion.arxiv_crawler import ArxivCrawler
+from ingestion.blog_crawler import BlogCrawler
 from ingestion.github_crawler import GitHubCrawler
-from ingestion.schema import AgentEvent, ResearchSignal
+from ingestion.patent_crawler import PatentCrawler
+from ingestion.schema import AgentEvent, ResearchSignal, SignalSource
+from ingestion.social_crawler import SocialCrawler
+from ingestion.startup_crawler import StartupCrawler
 import config
 
 logger = logging.getLogger("vectormind.ingestion_agent")
@@ -35,6 +39,10 @@ class IngestionAgent(BaseAgent):
             max_results=config.GITHUB_MAX_RESULTS,
             token=config.GITHUB_TOKEN,
         )
+        self.patent_crawler = PatentCrawler()
+        self.startup_crawler = StartupCrawler()
+        self.social_crawler = SocialCrawler()
+        self.blog_crawler = BlogCrawler()
         self.embedding_engine = EmbeddingEngine.get_instance()
         self.vector_store = VectorStore.get_instance()
 
@@ -46,6 +54,7 @@ class IngestionAgent(BaseAgent):
             "patents": {"status": "healthy", "last_success": None, "failures": 0},
             "startups": {"status": "healthy", "last_success": None, "failures": 0},
             "social": {"status": "healthy", "last_success": None, "failures": 0},
+            "blog": {"status": "healthy", "last_success": None, "failures": 0},
         }
 
     def setup(self):
@@ -111,62 +120,108 @@ class IngestionAgent(BaseAgent):
                 self._source_health["github"]["failures"] += 1
                 if self._source_health["github"]["failures"] >= 3:
                     self._source_health["github"]["status"] = "unhealthy"
-        # Fetch from Patents (Simulated for Phase 1.5)
+        # Fetch from Patents
         if source in ("all", "patents"):
             try:
-                # Mock patent signal for demo
-                from ingestion.schema import SourceType
-                patent_signal = ResearchSignal(
-                    source=SourceType.EXTERNAL, # Using EXTERNAL for patents
-                    source_id="US-2026-0012345",
-                    title="Distributed Multi-Agent Reasoning via Sparse Attention Meshes",
-                    authors=["VectorMind R&D"],
-                    raw_text="A method and system for optimizing multi-agent reasoning in decentralized networks...",
-                    url="https://patents.google.com/patent/US20260012345A1",
-                    metadata={"patent_number": "US20260012345", "assignee": "Samsung R&D"}
-                )
-                all_signals.append(patent_signal)
+                patent_signals = []
+                if config.ENABLE_PATENTS_REAL:
+                    patent_signals = await self.patent_crawler.fetch_recent_patents(
+                        max_results=config.PATENTS_MAX_RESULTS
+                    )
+                if not patent_signals and config.ALLOW_SIMULATED_SOURCES:
+                    patent_signals = [
+                        ResearchSignal(
+                            source=SignalSource.PATENT,
+                            source_id="US-2026-0012345",
+                            title="Distributed Multi-Agent Reasoning via Sparse Attention Meshes",
+                            authors=["VectorMind R&D"],
+                            raw_text="A method and system for optimizing multi-agent reasoning in decentralized networks...",
+                            url="https://patents.google.com/patent/US20260012345A1",
+                            metadata={
+                                "patent_number": "US20260012345",
+                                "assignee": "Samsung R&D",
+                                "simulated": True,
+                            },
+                        )
+                    ]
+                all_signals.extend(patent_signals)
                 self._source_health["patents"]["status"] = "healthy"
                 self._source_health["patents"]["last_success"] = datetime.utcnow().isoformat()
             except Exception as e:
                 logger.error(f"Patent ingestion failed: {e}")
                 self._source_health["patents"]["status"] = "unhealthy"
+                if config.ALLOW_SIMULATED_SOURCES:
+                    all_signals.extend(self._simulated_patent_signals())
 
-        # Fetch from Startup Ecosystem (Simulated Crunchbase/YC)
+        # Fetch from Startup Ecosystem
         if source in ("all", "startups"):
             try:
-                startup_signal = ResearchSignal(
-                    source=SourceType.EXTERNAL,
-                    source_id="YC-W26-VECT",
-                    title="Seed Funding: NeuroForge AI (YC W26)",
-                    authors=["YC"],
-                    raw_text="NeuroForge AI raises $5M to commercialize sparse attention architectures.",
-                    url="https://ycombinator.com/companies/neuroforge",
-                    metadata={"funding_round": "Seed", "amount": "$5M"}
-                )
-                all_signals.append(startup_signal)
+                startup_signals = []
+                if config.ENABLE_STARTUPS_REAL:
+                    startup_signals = await self.startup_crawler.fetch_startup_signals(
+                        max_results=config.STARTUPS_MAX_RESULTS
+                    )
+                if not startup_signals and config.ALLOW_SIMULATED_SOURCES:
+                    startup_signals = [
+                        ResearchSignal(
+                            source=SignalSource.STARTUP,
+                            source_id="YC-W26-VECT",
+                            title="Seed Funding: NeuroForge AI (YC W26)",
+                            authors=["YC"],
+                            raw_text="NeuroForge AI raises $5M to commercialize sparse attention architectures.",
+                            url="https://ycombinator.com/companies/neuroforge",
+                            metadata={"funding_round": "Seed", "amount": "$5M", "simulated": True},
+                        )
+                    ]
+                all_signals.extend(startup_signals)
                 self._source_health["startups"]["status"] = "healthy"
                 self._source_health["startups"]["last_success"] = datetime.utcnow().isoformat()
             except Exception:
                 self._source_health["startups"]["status"] = "unhealthy"
+                if config.ALLOW_SIMULATED_SOURCES:
+                    all_signals.extend(self._simulated_startup_signals())
 
-        # Fetch from Social (Hacker News / X)
+        # Fetch from Social (Hacker News)
         if source in ("all", "social"):
             try:
-                social_signal = ResearchSignal(
-                    source=SourceType.EXTERNAL,
-                    source_id="HN-4123456",
-                    title="Show HN: VectorMind - Open Source Research Intelligence",
-                    authors=["hn_user"],
-                    raw_text="The first agentic platform for autonomous research...",
-                    url="https://news.ycombinator.com/item?id=4123456",
-                    metadata={"upvotes": 450, "comments": 82}
-                )
-                all_signals.append(social_signal)
+                social_signals = []
+                if config.ENABLE_SOCIAL_REAL:
+                    social_signals = await self.social_crawler.fetch_hn_signals(
+                        max_results=config.SOCIAL_MAX_RESULTS
+                    )
+                if not social_signals and config.ALLOW_SIMULATED_SOURCES:
+                    social_signals = [
+                        ResearchSignal(
+                            source=SignalSource.SOCIAL,
+                            source_id="HN-4123456",
+                            title="Show HN: VectorMind - Open Source Research Intelligence",
+                            authors=["hn_user"],
+                            raw_text="The first agentic platform for autonomous research...",
+                            url="https://news.ycombinator.com/item?id=4123456",
+                            metadata={"upvotes": 450, "comments": 82, "simulated": True},
+                        )
+                    ]
+                all_signals.extend(social_signals)
                 self._source_health["social"]["status"] = "healthy"
                 self._source_health["social"]["last_success"] = datetime.utcnow().isoformat()
             except Exception:
                 self._source_health["social"]["status"] = "unhealthy"
+                if config.ALLOW_SIMULATED_SOURCES:
+                    all_signals.extend(self._simulated_social_signals())
+
+        # Fetch from Blogs (labs + ecosystem)
+        if source in ("all", "blog"):
+            try:
+                blog_signals = []
+                if config.ENABLE_BLOG_REAL:
+                    blog_signals = await self.blog_crawler.fetch_blog_signals(
+                        max_results=config.BLOG_MAX_RESULTS
+                    )
+                all_signals.extend(blog_signals)
+                self._source_health["blog"]["status"] = "healthy"
+                self._source_health["blog"]["last_success"] = datetime.utcnow().isoformat()
+            except Exception:
+                self._source_health["blog"]["status"] = "unhealthy"
 
         # Embed all signals
         if all_signals:
@@ -234,3 +289,46 @@ class IngestionAgent(BaseAgent):
             ),
         })
         return health
+
+    def _simulated_patent_signals(self) -> list[ResearchSignal]:
+        return [
+            ResearchSignal(
+                source=SignalSource.PATENT,
+                source_id="US-2026-0012345",
+                title="Distributed Multi-Agent Reasoning via Sparse Attention Meshes",
+                authors=["VectorMind R&D"],
+                raw_text="A method and system for optimizing multi-agent reasoning in decentralized networks...",
+                url="https://patents.google.com/patent/US20260012345A1",
+                metadata={
+                    "patent_number": "US20260012345",
+                    "assignee": "Samsung R&D",
+                    "simulated": True,
+                },
+            )
+        ]
+
+    def _simulated_startup_signals(self) -> list[ResearchSignal]:
+        return [
+            ResearchSignal(
+                source=SignalSource.STARTUP,
+                source_id="YC-W26-VECT",
+                title="Seed Funding: NeuroForge AI (YC W26)",
+                authors=["YC"],
+                raw_text="NeuroForge AI raises $5M to commercialize sparse attention architectures.",
+                url="https://ycombinator.com/companies/neuroforge",
+                metadata={"funding_round": "Seed", "amount": "$5M", "simulated": True},
+            )
+        ]
+
+    def _simulated_social_signals(self) -> list[ResearchSignal]:
+        return [
+            ResearchSignal(
+                source=SignalSource.SOCIAL,
+                source_id="HN-4123456",
+                title="Show HN: VectorMind - Open Source Research Intelligence",
+                authors=["hn_user"],
+                raw_text="The first agentic platform for autonomous research...",
+                url="https://news.ycombinator.com/item?id=4123456",
+                metadata={"upvotes": 450, "comments": 82, "simulated": True},
+            )
+        ]

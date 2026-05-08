@@ -1,3 +1,10 @@
+import java.util.Properties
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) load(file.inputStream())
+}
+
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
@@ -13,6 +20,11 @@ android {
     defaultConfig {
         minSdk = 31
         consumerProguardFiles("consumer-rules.pro")
+        buildConfigField(
+            "String",
+            "BACKEND_URL",
+            "\"${localProperties["BACKEND_URL"] ?: "http://10.0.2.2:8000"}\""
+        )
     }
 
     buildTypes {
@@ -51,7 +63,6 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.gson)
     implementation(libs.okhttp)
-    implementation(libs.okhttp.logging.interceptor)
 
     // Kotlin Serialization
     implementation(libs.kotlinx.serialization.json)

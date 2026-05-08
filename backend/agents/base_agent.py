@@ -12,10 +12,16 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional
 
+import config
 from agents.message_bus import MessageBus
 from ingestion.schema import AgentEvent
 
 logger = logging.getLogger("vectormind.agent")
+
+try:
+    import redis.asyncio as redis_async
+except Exception:  # pragma: no cover - optional dependency
+    redis_async = None
 
 
 class BaseAgent(ABC):
@@ -31,6 +37,7 @@ class BaseAgent(ABC):
         self._status = "idle"
         self._subscribed_topics: list[str] = []
         self._queues: list[asyncio.Queue] = []
+        self._state_store = None
 
     @property
     def status(self) -> str:
@@ -65,6 +72,8 @@ class BaseAgent(ABC):
         """Start the agent's event loop."""
         self._running = True
         self._status = "running"
+        if config.STATE_STORE_BACKEND == "redis" and redis_async is not None:
+            self._state_store = redis_async.from_url(config.REDIS_URL, decode_responses=True)
         self.setup()
         logger.info(f"Agent '{self.name}' started")
         self._task = asyncio.create_task(self._run_loop())
@@ -79,6 +88,8 @@ class BaseAgent(ABC):
                 await self._task
             except asyncio.CancelledError:
                 pass
+        if self._state_store is not None:
+            await self._state_store.close()
         logger.info(f"Agent '{self.name}' stopped")
 
     async def _run_loop(self):
@@ -92,6 +103,7 @@ class BaseAgent(ABC):
                         await self.process_event(event)
                         self._events_processed += 1
                         self._last_heartbeat = datetime.utcnow()
+                        await self._checkpoint_state()
                     except asyncio.QueueEmpty:
                         continue
 
@@ -108,6 +120,24 @@ class BaseAgent(ABC):
                 self._status = "error"
                 await asyncio.sleep(1.0)
                 self._status = "running"
+
+    async def _checkpoint_state(self):
+        """Persist light agent heartbeat/status to Redis when enabled."""
+        if self._state_store is None:
+            return
+        try:
+            key = f"vectormind:agent:{self.name}:state"
+            await self._state_store.hset(
+                key,
+                mapping={
+                    "status": self._status,
+                    "events_processed": str(self._events_processed),
+                    "last_heartbeat": self._last_heartbeat.isoformat(),
+                },
+            )
+            await self._state_store.expire(key, 3600)
+        except Exception as e:
+            logger.error(f"Agent '{self.name}' checkpoint failed: {e}")
 
     def setup(self):
         """Optional setup hook called before the event loop starts."""

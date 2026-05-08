@@ -1,4 +1,4 @@
-package com.vectormind.app.ui.dashboard.components
+package com.vectorminds.app.ui.dashboard.components
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -14,13 +14,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vectorminds.app.ui.theme.*
-import kotlin.math.cos
-import kotlin.math.sin
+import kotlin.random.Random
 
 data class GalaxyPoint(
     val x: Float,
@@ -104,7 +102,7 @@ fun ResearchGalaxy(
                 // Core point
                 drawCircle(
                     color = color,
-                    radius = (3.dp + (point.score * 2.dp)).toPx(),
+                    radius = (3f + (point.score * 2f)).dp.toPx(),
                     center = Offset(xPos, yPos)
                 )
             }
@@ -143,23 +141,20 @@ fun LegendItem(label: String, color: Color) {
 
 @Composable
 fun Starfield() {
-    val infiniteTransition = rememberInfiniteTransition(label = "stars")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.2f,
-        targetValue = 0.6f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3000),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "star_twinkle"
-    )
-
+    // Static stars — no infinite transition. The galaxy already has a
+    // pulse animation; running a second one for ~50 stars at ~60fps was
+    // wasteful and caused first-frame jank on slow emulators.
     Canvas(modifier = Modifier.fillMaxSize()) {
-        // Draw static tiny stars
-        repeat(50) {
-            val x = (0..size.width.toInt()).random().toFloat()
-            val y = (0..size.height.toInt()).random().toFloat()
-            drawCircle(Color.White.copy(alpha = alpha * (0.5f..1f).random().toFloat()), radius = 1.dp.toPx(), center = Offset(x, y))
+        val rng = Random(42)
+        repeat(40) {
+            val x = rng.nextFloat() * size.width
+            val y = rng.nextFloat() * size.height
+            val starAlpha = 0.3f + (rng.nextFloat() * 0.4f)
+            drawCircle(
+                Color.White.copy(alpha = starAlpha),
+                radius = 1.dp.toPx(),
+                center = Offset(x, y),
+            )
         }
     }
 }

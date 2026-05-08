@@ -19,7 +19,7 @@ import javax.inject.Singleton
  * Follows the same OpenClaw pattern as the central VectorMindAgent.
  */
 @Singleton
-class VectorMindAgent @Inject constructor(
+class VectorMindsAgent @Inject constructor(
     private val api: VectorMindsApi,
     private val skillRegistry: SkillRegistry,
     private val actionLogDao: ActionLogDao,
@@ -57,6 +57,7 @@ class VectorMindAgent @Inject constructor(
             val description = when (result) {
                 is SkillResult.Success -> result.description
                 is SkillResult.Failure -> "Failed: ${result.error}"
+                SkillResult.Skipped -> "Skipped: trigger conditions not met"
             }
             
             val logEntry = ActionLogEntity(

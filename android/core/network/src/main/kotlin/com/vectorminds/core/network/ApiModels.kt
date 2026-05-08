@@ -6,7 +6,17 @@ import com.google.gson.annotations.SerializedName
 
 data class IngestRequest(
     val source: String = "all",
-    val category: String? = null
+    val category: String? = null,
+    val background: Boolean = false,
+)
+
+data class IngestionStatus(
+    val state: String = "idle",
+    @SerializedName("started_at") val startedAt: String? = null,
+    @SerializedName("finished_at") val finishedAt: String? = null,
+    @SerializedName("signals_ingested") val signalsIngested: Int = 0,
+    @SerializedName("trends_updated") val trendsUpdated: Int = 0,
+    val error: String? = null,
 )
 
 data class BlueprintRequest(
@@ -18,6 +28,13 @@ data class PipelineRequest(
     @SerializedName("technique_name") val techniqueName: String,
     val description: String = "",
     @SerializedName("task_type") val taskType: String? = null
+)
+
+data class DatasetCandidatesRequest(
+    @SerializedName("technique_name") val techniqueName: String,
+    val description: String = "",
+    @SerializedName("task_type") val taskType: String? = null,
+    @SerializedName("top_k") val topK: Int = 8,
 )
 
 data class SearchRequest(
@@ -126,19 +143,45 @@ data class BlueprintsListResponse(
 data class PipelineResponse(
     val id: String,
     @SerializedName("technique_name") val techniqueName: String,
-    @SerializedName("task_type") val taskType: String,
-    @SerializedName("dataset_name") val datasetName: String,
-    @SerializedName("model_architecture") val modelArchitecture: String,
-    @SerializedName("notebook_content") val notebookContent: String,
-    @SerializedName("colab_url") val colabUrl: String,
-    val status: String,
-    val metrics: Map<String, String>?,
-    @SerializedName("model_card") val modelCard: String
+    @SerializedName("task_type") val taskType: String = "",
+    @SerializedName("dataset_name") val datasetName: String = "",
+    @SerializedName("model_architecture") val modelArchitecture: String = "",
+    @SerializedName("notebook_content") val notebookContent: String = "",
+    @SerializedName("colab_url") val colabUrl: String = "",
+    val status: String = "generated",
+    // The backend stores arbitrary values (numbers, nested run snapshots,
+    // gist metadata). Use `Any?` so Gson never blows up on shape changes —
+    // the UI doesn't render this map directly anyway.
+    val metrics: Map<String, Any>? = null,
+    @SerializedName("model_card") val modelCard: String = ""
 )
 
 data class PipelinesListResponse(
     val pipelines: List<PipelineResponse>,
     val count: Int
+)
+
+data class DatasetCandidate(
+    val name: String,
+    val source: String,
+    val url: String,
+    val downloads: Int
+)
+
+data class DatasetCandidatesResponse(
+    val candidates: List<DatasetCandidate>,
+    val count: Int
+)
+
+data class DashboardPremiumContextResponse(
+    val location: String,
+    val focus: String,
+    @SerializedName("next_meeting") val nextMeeting: String,
+    @SerializedName("author_name") val authorName: String,
+    @SerializedName("papers_count") val papersCount: Int,
+    val confidence: Double,
+    @SerializedName("reasoning_points") val reasoningPoints: List<String>,
+    @SerializedName("source_modes") val sourceModes: Map<String, Boolean>,
 )
 
 data class SearchResponse(
@@ -170,8 +213,10 @@ data class VectorPoint(
 
 data class IngestResponse(
     val status: String,
-    @SerializedName("signals_ingested") val signalsIngested: Int,
-    @SerializedName("trends_updated") val trendsUpdated: Int
+    @SerializedName("signals_ingested") val signalsIngested: Int? = null,
+    @SerializedName("trends_updated") val trendsUpdated: Int? = null,
+    val message: String? = null,
+    @SerializedName("started_at") val startedAt: String? = null,
 )
 
 data class FeedbackResponse(
