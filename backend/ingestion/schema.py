@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SignalSource(str, Enum):
@@ -90,6 +90,9 @@ class ProductBlueprint(BaseModel):
 
 class MLPipeline(BaseModel):
     """A generated ML training pipeline."""
+
+    # Fields named model_* otherwise trip Pydantic v2's protected "model_" namespace.
+    model_config = ConfigDict(protected_namespaces=())
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     technique_name: str

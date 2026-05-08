@@ -11,6 +11,7 @@ import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -305,8 +306,11 @@ async def lifespan(app: FastAPI):
         trends=_trends_provider,
         pipelines=_pipelines_provider,
     )
+    # Schedule Telegram polling in the background so a slow cold-start to
+    # api.telegram.org (common on Hugging Face) cannot delay /health or /docs.
+    tg_polling_task: Optional[asyncio.Task] = None
     if tg_bot.enabled:
-        await tg_bot.start_polling()
+        tg_polling_task = asyncio.create_task(tg_bot.start_polling())
 
     logger.info("=" * 60)
     logger.info("  All systems operational. Ready to serve.")
@@ -318,6 +322,12 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ─────────────────────────────────
     logger.info("Shutting down agents...")
+    if tg_polling_task and not tg_polling_task.done():
+        tg_polling_task.cancel()
+        try:
+            await tg_polling_task
+        except (asyncio.CancelledError, Exception):
+            pass
     if tg_bot.enabled:
         await tg_bot.stop_polling()
     await ing_agent.stop()
