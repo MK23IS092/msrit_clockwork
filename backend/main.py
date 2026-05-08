@@ -344,10 +344,20 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
-    allow_credentials=True,
+    # We don't authenticate via cookies, so credentials=False lets us keep a
+    # wildcard origin (browsers refuse `*` together with credentials=True).
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/health")
+async def public_health():
+    """Lightweight readiness probe used by Hugging Face Spaces and the
+    Android app's status pill. Stays free of database I/O so it answers
+    instantly even while background ingestion is busy."""
+    return {"status": "ok", "service": "vectormind-backend"}
 
 # ─── Routes ───────────────────────────────────────────────────
 app.include_router(api_routes.router)

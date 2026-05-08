@@ -1,26 +1,59 @@
 package com.vectorminds.app.ui.trends
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.AutoGraph
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.vectorminds.app.ui.theme.*
-import com.vectorminds.core.network.TrendDetail
-import com.vectorminds.core.network.VectorMindsApi
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.vectorminds.app.ui.components.VmButton
+import com.vectorminds.app.ui.components.VmButtonStyle
+import com.vectorminds.app.ui.components.VmCard
+import com.vectorminds.app.ui.components.VmChip
+import com.vectorminds.app.ui.components.VmChipStyle
+import com.vectorminds.app.ui.components.VmMarkdown
+import com.vectorminds.app.ui.components.VmScoreRing
+import com.vectorminds.app.ui.theme.Vm
+import com.vectorminds.core.network.TrendDetail
+import com.vectorminds.core.network.VectorMindsApi
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,13 +69,14 @@ fun TrendDetailScreen(
     onBack: () -> Unit,
     onShowBlueprints: () -> Unit = {},
     onShowPipelines: () -> Unit = {},
-    viewModel: TrendDetailViewModel = hiltViewModel()
+    viewModel: TrendDetailViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(trendId) { viewModel.loadTrend(trendId) }
     val detail by viewModel.detail.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val isBriefLoading by viewModel.isBriefLoading.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
+    val vm = Vm.colors
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -59,17 +93,14 @@ fun TrendDetailScreen(
                 }
                 is TrendDetailEvent.PipelineReady -> {
                     val res = snackbarHostState.showSnackbar(
-                        message = "ML pipeline generated • Colab ready",
+                        message = "ML pipeline generated · Colab ready",
                         actionLabel = "View",
                         duration = SnackbarDuration.Short,
                     )
                     if (res == SnackbarResult.ActionPerformed) onShowPipelines()
                 }
                 is TrendDetailEvent.Error -> {
-                    snackbarHostState.showSnackbar(
-                        message = event.message,
-                        duration = SnackbarDuration.Short,
-                    )
+                    snackbarHostState.showSnackbar(event.message, duration = SnackbarDuration.Short)
                 }
             }
         }
@@ -77,168 +108,233 @@ fun TrendDetailScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = vm.background,
     ) { padding ->
-        Column(
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .background(vm.background)
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
+                .padding(horizontal = 16.dp),
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, "Back")
+            item {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(vm.surfaceElevated)
+                            .border(1.dp, vm.border, RoundedCornerShape(12.dp))
+                            .clickable(onClick = onBack),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.ArrowBack, "Back", tint = vm.textMuted, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "TREND DETAIL",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = vm.brand,
+                    )
+                }
             }
 
             if (isLoading && detail == null) {
-                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = CyanPrimary)
+                item {
+                    Box(
+                        Modifier.fillMaxWidth().padding(vertical = 64.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { CircularProgressIndicator(color = vm.brand) }
                 }
             } else if (detail != null) {
                 val d = detail!!
 
-                Text(d.techniqueName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ScoreChip(Modifier.weight(1f), "Emergence", d.emergenceScore, ScoreHigh)
-                    ScoreChip(Modifier.weight(1f), "Novelty", d.noveltyScore, CyanPrimary)
-                    ScoreChip(Modifier.weight(1f), "Impact", d.impactScore, PurpleSecondary)
+                item {
+                    Text(
+                        d.techniqueName,
+                        style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                        color = vm.text,
+                    )
                 }
 
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ScoreChip(Modifier.weight(1f), "Confidence", d.confidence, EmeraldTertiary)
-                    ScoreChip(Modifier.weight(1f), "ETA", d.mainstreamEtaMonths.toDouble() / 24, WarningAmber, "${d.mainstreamEtaMonths}mo")
+                // Score panel — 4 rings + chip row, no overlap
+                item { ScorePanel(d) }
+
+                // Description
+                if (d.description.isNotBlank()) {
+                    item { SectionCard(title = "Description") { VmMarkdown(d.description) } }
                 }
 
-                Spacer(Modifier.height(16.dp))
-
-                SectionCard("Description", d.description)
-
-                if (isBriefLoading && d.technicalBrief.isNullOrEmpty()) {
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = CyanPrimary,
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            "Generating technical brief…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                // Technical brief — markdown rendered, with shimmer if pending
+                item {
+                    when {
+                        !d.technicalBrief.isNullOrBlank() -> SectionCard(title = "Technical Brief") {
+                            VmMarkdown(d.technicalBrief!!)
+                        }
+                        isBriefLoading -> VmCard {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = vm.brand,
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    "Generating technical brief…",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = vm.textMuted,
+                                )
+                            }
+                        }
                     }
                 }
 
-                if (!d.technicalBrief.isNullOrEmpty()) {
-                    Spacer(Modifier.height(12.dp))
-                    SectionCard("Technical Brief", d.technicalBrief!!)
-                }
-
+                // Competitive landscape — FlowRow so chips wrap
                 if (!d.competitiveLandscape.isNullOrEmpty()) {
-                    Spacer(Modifier.height(12.dp))
-                    SectionCard("Competes With", d.competitiveLandscape!!.joinToString(", "))
-                }
-
-                if (!d.riskFactors.isNullOrEmpty()) {
-                    Spacer(Modifier.height(12.dp))
-                    SectionCard("Risk Factors", d.riskFactors!!.joinToString("\n• ", prefix = "• "))
-                }
-
-                Spacer(Modifier.height(24.dp))
-
-                Button(
-                    onClick = { viewModel.generateBlueprint(d.id, d.techniqueName) },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = CyanPrimary),
-                    enabled = !isGenerating
-                ) {
-                    if (isGenerating) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            color = Navy10,
-                            strokeWidth = 2.dp,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Generating…", color = Navy10, fontWeight = FontWeight.Bold)
-                    } else {
-                        Icon(Icons.Default.Description, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Generate Product Blueprint", color = Navy10, fontWeight = FontWeight.Bold)
+                    item {
+                        VmCard {
+                            EyebrowLabel("Competes With")
+                            Spacer(Modifier.height(10.dp))
+                            ChipFlow(d.competitiveLandscape!!.take(8))
+                        }
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
-
-                OutlinedButton(
-                    onClick = { viewModel.generatePipeline(d.techniqueName, d.description) },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = PurpleSecondary),
-                    enabled = !isGenerating
-                ) {
-                    Icon(Icons.Default.Terminal, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Launch ML Training Pipeline", fontWeight = FontWeight.Bold)
+                // Risk factors — bullets via markdown helper for consistency
+                if (!d.riskFactors.isNullOrEmpty()) {
+                    item {
+                        VmCard {
+                            EyebrowLabel("Risk Factors", color = vm.amber)
+                            Spacer(Modifier.height(10.dp))
+                            d.riskFactors!!.forEach { r ->
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Box(
+                                        Modifier
+                                            .padding(top = 8.dp)
+                                            .size(4.dp)
+                                            .clip(RoundedCornerShape(50))
+                                            .background(vm.amber),
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        r,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = vm.text,
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
+                            }
+                        }
+                    }
                 }
 
-                Spacer(Modifier.height(32.dp))
+                // Related techniques
+                if (!d.relatedTechniques.isNullOrEmpty()) {
+                    item {
+                        VmCard {
+                            EyebrowLabel("Related Techniques")
+                            Spacer(Modifier.height(10.dp))
+                            ChipFlow(d.relatedTechniques!!.take(10))
+                        }
+                    }
+                }
+
+                // Actions
+                item {
+                    VmButton(
+                        text = if (isGenerating) "Generating…" else "Generate Product Blueprint",
+                        onClick = { viewModel.generateBlueprint(d.id, d.techniqueName) },
+                        icon = Icons.Filled.AutoGraph,
+                        loading = isGenerating,
+                        enabled = !isGenerating,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                item {
+                    VmButton(
+                        text = "Launch ML Training Pipeline",
+                        onClick = { viewModel.generatePipeline(d.techniqueName, d.description) },
+                        style = VmButtonStyle.Secondary,
+                        icon = Icons.Filled.Terminal,
+                        enabled = !isGenerating,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                item { Spacer(Modifier.height(40.dp)) }
             } else {
-                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("Trend not found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                item {
+                    Box(
+                        Modifier.fillMaxWidth().padding(64.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("Trend not found", color = vm.textMuted) }
                 }
             }
         }
     }
 }
 
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
 @Composable
-fun ScoreChip(
-    modifier: Modifier = Modifier,
-    label: String,
-    value: Double,
-    color: androidx.compose.ui.graphics.Color,
-    displayText: String? = null,
-) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f)),
-        shape = RoundedCornerShape(12.dp),
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                displayText ?: "${"%.0f".format(value * 100)}%",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = color,
-            )
+private fun ScorePanel(d: TrendDetail) {
+    val vm = Vm.colors
+    VmCard {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround,
+        ) {
+            VmScoreRing(progress = d.emergenceScore.toFloat(), label = "Emerge")
+            VmScoreRing(progress = d.noveltyScore.toFloat(), label = "Novel", accent = vm.brand)
+            VmScoreRing(progress = d.impactScore.toFloat(), label = "Impact", accent = vm.violet)
+            VmScoreRing(progress = d.confidence.toFloat(), label = "Conf", accent = vm.emerald)
         }
+        Spacer(Modifier.height(14.dp))
+        ChipFlow(
+            buildList {
+                add("ETA ${d.mainstreamEtaMonths} mo")
+                d.relatedTechniques?.size?.let { if (it > 0) add("$it related") }
+                add("rank #${d.rank}")
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChipFlow(items: List<String>) {
+    if (items.isEmpty()) return
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        items.forEach { VmChip(it, style = VmChipStyle.Outline) }
     }
 }
 
 @Composable
-fun SectionCard(title: String, content: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        shape = RoundedCornerShape(12.dp),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = CyanPrimary)
-            Spacer(Modifier.height(8.dp))
-            Text(content, style = MaterialTheme.typography.bodyMedium)
-        }
+private fun SectionCard(title: String, content: @Composable () -> Unit) {
+    VmCard {
+        EyebrowLabel(title)
+        Spacer(Modifier.height(10.dp))
+        content()
     }
 }
+
+@Composable
+private fun EyebrowLabel(text: String, color: androidx.compose.ui.graphics.Color? = null) {
+    val vm = Vm.colors
+    Text(
+        text.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = color ?: vm.textFaint,
+    )
+}
+
+// ─── ViewModel & events ──────────────────────────────────────────────────────
 
 sealed interface TrendDetailEvent {
     data class BlueprintReady(val techniqueName: String) : TrendDetailEvent
@@ -250,17 +346,18 @@ sealed interface TrendDetailEvent {
 class TrendDetailViewModel @Inject constructor(
     private val api: VectorMindsApi,
 ) : ViewModel() {
+
     private val _detail = MutableStateFlow<TrendDetail?>(null)
     val detail: StateFlow<TrendDetail?> = _detail
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading
 
-    private val _isGenerating = MutableStateFlow(false)
-    val isGenerating: StateFlow<Boolean> = _isGenerating
-
     private val _isBriefLoading = MutableStateFlow(false)
     val isBriefLoading: StateFlow<Boolean> = _isBriefLoading
+
+    private val _isGenerating = MutableStateFlow(false)
+    val isGenerating: StateFlow<Boolean> = _isGenerating
 
     private val _events = MutableSharedFlow<TrendDetailEvent>(extraBufferCapacity = 4)
     val events: SharedFlow<TrendDetailEvent> = _events.asSharedFlow()

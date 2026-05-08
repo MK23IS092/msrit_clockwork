@@ -28,11 +28,18 @@ android {
             useSupportLibrary = true
         }
 
-        // Backend API URL — configurable for demo
+        // Backend API URL.
+        // Resolution order: local.properties → BACKEND_URL env var (CI) →
+        // emulator localhost fallback. The CI release pipeline injects the
+        // production HF Space URL via env so judges' APKs always hit a stable
+        // hosted backend. Trailing slash is stripped to match Retrofit.
+        val backendUrl: String = (localProperties["BACKEND_URL"] as String?)
+            ?: System.getenv("BACKEND_URL")
+            ?: "http://10.0.2.2:8000"
         buildConfigField(
             "String",
             "BACKEND_URL",
-            "\"${localProperties["BACKEND_URL"] ?: "http://10.0.2.2:8000"}\""
+            "\"${backendUrl.trimEnd('/')}\"",
         )
     }
 

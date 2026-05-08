@@ -1,0 +1,107 @@
+name: Deploy backend to Hugging Face Space
+
+# Push the contents of `backend/` to a Hugging Face Docker Space whenever
+# backend code changes on main. The Space rebuilds itself from the Dockerfile
+# included in the push, so the Android APK never has to be re-cut just because
+# the backend changed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-deploy-hf.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: hf-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Verify required secrets
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          HF_SPACE_NAME: ${{ secrets.HF_SPACE_NAME }}
+        run: |
+          missing=()
+          [ -z "$HF_TOKEN" ]      && missing+=("HF_TOKEN")
+          [ -z "$HF_USERNAME" ]   && missing+=("HF_USERNAME")
+          [ -z "$HF_SPACE_NAME" ] && missing+=("HF_SPACE_NAME")
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Missing required GitHub secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Push backend/ to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          HF_SPACE_NAME: ${{ secrets.HF_SPACE_NAME }}
+        run: |
+          set -euo pipefail
+          git config --global user.email "ci@github.com"
+          git config --global user.name  "VectorMind CI"
+          git config --global init.defaultBranch main
+
+          # Clone the existing HF Space repo. If it doesn't exist yet, create
+          # it via the HF API so the very first deploy doesn't fail.
+          space_url="https://huggingface.co/spaces/${HF_USERNAME}/${HF_SPACE_NAME}"
+          auth_url="https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_USERNAME}/${HF_SPACE_NAME}"
+
+          if ! curl -s -f -o /dev/null "$space_url"; then
+            echo "Space does not exist yet — creating it (Docker SDK)…"
+            curl -s -f -X POST \
+              -H "Authorization: Bearer ${HF_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{\"type\":\"space\",\"name\":\"${HF_SPACE_NAME}\",\"sdk\":\"docker\",\"private\":false}" \
+              https://huggingface.co/api/repos/create
+          fi
+
+          rm -rf hf_space
+          git clone "$auth_url" hf_space || {
+            # Brand-new empty space — initialise locally
+            mkdir -p hf_space
+            git -C hf_space init -b main
+            git -C hf_space remote add origin "$auth_url"
+          }
+
+          # Replace contents with current backend/ (preserve .git only).
+          rsync -a --delete --exclude='.git' backend/ hf_space/
+
+          # HF Spaces require front-matter in README.md so they know the SDK
+          # and port. We always overwrite the README so the Space metadata
+          # stays in sync with this repo.
+          cat > hf_space/README.md <<'EOF'
+          ---
+          title: VectorMind Backend
+          emoji: 🧠
+          colorFrom: indigo
+          colorTo: purple
+          sdk: docker
+          app_port: 7860
+          pinned: false
+          short_description: Autonomous AI research intelligence backend
+          ---
+
+          # VectorMind Backend
+
+          FastAPI service that powers the VectorMind Android app. Source of
+          truth lives in [the GitHub repo](https://github.com/) — this Space
+          is auto-deployed on every push to `main`.
+          EOF
+
+          cd hf_space
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes vs HF Space — nothing to push."
+            exit 0
+          fi
+          git commit -m "deploy: ${GITHUB_SHA::7} from ${GITHUB_REPOSITORY}"
+          git push origin HEAD:main
