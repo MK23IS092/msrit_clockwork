@@ -1,4 +1,0 @@
-  File "D:\zamzung\backend\data\pipeline_runs\d30f2c12-4c47-40db-ba18-a7edd989515c\68664895-2b01-4fc4-9465-9413515b0d90\pipeline.py", line 11
-    !pip install -q transformers datasets accelerate optuna onnx safetensors evaluate torch pillow
-    ^
-SyntaxError: invalid syntax
