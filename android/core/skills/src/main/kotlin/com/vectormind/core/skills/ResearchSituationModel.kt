@@ -1,4 +1,4 @@
-package com.vectormind.core.skills
+package com.vectorminds.core.skills
 
 /**
  * Situational model for research intelligence.

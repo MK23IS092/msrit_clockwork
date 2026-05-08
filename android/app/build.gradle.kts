@@ -13,11 +13,11 @@ plugins {
 }
 
 android {
-    namespace = "com.vectormind.app"
+    namespace = "com.vectorminds.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.vectormind.app"
+        applicationId = "com.vectorminds.app"
         minSdk = 31
         targetSdk = 34
         versionCode = 1
@@ -36,6 +36,31 @@ android {
         )
     }
 
+    val releaseStorePath = (localProperties["RELEASE_KEYSTORE_PATH"] as String?)
+        ?: System.getenv("RELEASE_KEYSTORE_PATH")
+    val releaseStorePassword = (localProperties["RELEASE_KEYSTORE_PASSWORD"] as String?)
+        ?: System.getenv("RELEASE_KEYSTORE_PASSWORD")
+    val releaseKeyAlias = (localProperties["RELEASE_KEY_ALIAS"] as String?)
+        ?: System.getenv("RELEASE_KEY_ALIAS")
+    val releaseKeyPassword = (localProperties["RELEASE_KEY_PASSWORD"] as String?)
+        ?: System.getenv("RELEASE_KEY_PASSWORD")
+
+    signingConfigs {
+        if (
+            releaseStorePath != null &&
+            releaseStorePassword != null &&
+            releaseKeyAlias != null &&
+            releaseKeyPassword != null
+        ) {
+            create("release") {
+                storeFile = file(releaseStorePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -44,6 +69,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
         debug {
             isMinifyEnabled = false
@@ -116,4 +143,12 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:service"))
     implementation(project(":core:skills"))
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockk)
+
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.compose.ui.test.junit4)
 }

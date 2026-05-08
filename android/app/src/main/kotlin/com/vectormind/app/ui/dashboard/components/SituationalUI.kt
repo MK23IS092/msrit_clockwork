@@ -1,4 +1,4 @@
-package com.vectormind.app.ui.dashboard.components
+package com.vectorminds.app.ui.dashboard.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*

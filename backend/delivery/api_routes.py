@@ -10,10 +10,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, Header
 from pydantic import BaseModel
 
 from agents.ingestion_agent import IngestionAgent
@@ -22,9 +22,12 @@ from agents.memory_agent import MemoryAgent
 from embeddings.engine import EmbeddingEngine
 from embeddings.vector_store import VectorStore
 from intelligence.blueprint_engine import BlueprintEngine
+from intelligence.experiment_designer import ExperimentDesigner
 from intelligence.pipeline_generator import PipelineGenerator
+from intelligence.pipeline_executor import PipelineExecutor
 from delivery.telegram_bot import TelegramBot
 from db.database import Database
+import config
 
 logger = logging.getLogger("vectorminds.api")
 
@@ -36,6 +39,8 @@ reasoning_agent: Optional[ReasoningAgent] = None
 memory_agent: Optional[MemoryAgent] = None
 blueprint_engine: Optional[BlueprintEngine] = None
 pipeline_generator: Optional[PipelineGenerator] = None
+pipeline_executor: Optional[PipelineExecutor] = None
+experiment_designer: Optional[ExperimentDesigner] = None
 telegram_bot: Optional[TelegramBot] = None
 embedding_engine: Optional[EmbeddingEngine] = None
 vector_store: Optional[VectorStore] = None
@@ -49,6 +54,23 @@ ws_connections: list[WebSocket] = []
 class IngestRequest(BaseModel):
     source: str = "all"  # 'arxiv', 'github', or 'all'
     category: Optional[str] = None  # e.g. 'cs.LG'
+    # When True, kick the ingestion run off in the background and return
+    # immediately with status="started". Lets mobile clients show a banner
+    # without holding open a 60–120s HTTP request that arXiv often pushes
+    # past their OkHttp read timeout.
+    background: bool = False
+
+
+# In-memory tracker for the most recent ingestion run. Keeps the UI honest
+# about what's happening on the server even when the call is fire-and-forget.
+_ingestion_status: dict = {
+    "state": "idle",  # 'idle' | 'running' | 'completed' | 'failed'
+    "started_at": None,
+    "finished_at": None,
+    "signals_ingested": 0,
+    "trends_updated": 0,
+    "error": None,
+}
 
 
 class BlueprintRequest(BaseModel):
@@ -60,6 +82,31 @@ class PipelineRequest(BaseModel):
     technique_name: str
     description: str = ""
     task_type: Optional[str] = None
+
+class PipelineDatasetCandidatesRequest(BaseModel):
+    technique_name: str
+    description: str = ""
+    task_type: Optional[str] = None
+    top_k: int = 8
+
+
+class PipelineRunRequest(BaseModel):
+    timeout_seconds: int = config.PIPELINE_RUN_TIMEOUT_SECONDS
+    wait_for_completion: bool = False
+
+class ExperimentDesignRequest(BaseModel):
+    technique_name: str
+    brief: str = ""
+
+class DashboardPremiumContextResponse(BaseModel):
+    location: str
+    focus: str
+    next_meeting: str
+    author_name: str
+    papers_count: int
+    confidence: float
+    reasoning_points: list[str]
+    source_modes: dict
 
 
 class FeedbackRequest(BaseModel):
@@ -74,10 +121,38 @@ class SearchRequest(BaseModel):
     source_filter: Optional[str] = None
 
 
+def _assert_admin_api_key(x_api_key: Optional[str]):
+    if not config.API_ADMIN_KEY:
+        return
+    if x_api_key != config.API_ADMIN_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _apply_run_snapshot_to_pipeline(pipeline, run: dict):
+    if run["status"] in ("completed", "failed", "timeout"):
+        pipeline.status = run["status"]
+    else:
+        pipeline.status = "training"
+    metrics = dict(pipeline.metrics or {})
+    metrics["last_run"] = {
+        "run_id": run["run_id"],
+        "status": run["status"],
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "exit_code": run.get("exit_code"),
+        "duration_seconds": run.get("duration_seconds"),
+        "log_path": run.get("log_path"),
+        "artifacts_dir": run.get("artifacts_dir"),
+        "retry_count": run.get("retry_count", 0),
+        "max_retries": run.get("max_retries", 0),
+    }
+    pipeline.metrics = metrics
+
+
 # ─── Broadcast helper ────────────────────────────────────────
 async def broadcast_ws(event_type: str, data: dict):
     """Send real-time update to all connected WebSocket clients."""
-    message = json.dumps({"type": event_type, "data": data, "timestamp": datetime.utcnow().isoformat()})
+    message = json.dumps({"type": event_type, "data": data, "timestamp": datetime.now(timezone.utc).isoformat()})
     disconnected = []
     for ws in ws_connections:
         try:
@@ -103,9 +178,15 @@ async def health_check():
 
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "agents": agents_health,
         "vector_store_count": vector_store.get_collection_count() if vector_store else 0,
+        "infra": {
+            "event_bus_backend": config.MESSAGE_BUS_BACKEND,
+            "state_store_backend": config.STATE_STORE_BACKEND,
+            "db_backend": config.DB_BACKEND,
+            "vector_store_backend": "qdrant_in_memory" if not config.QDRANT_HOST else "qdrant_remote",
+        },
     }
 
 
@@ -134,61 +215,185 @@ async def get_stats():
             "reasoning": reasoning_agent.status if reasoning_agent else "offline",
             "memory": memory_agent.status if memory_agent else "offline",
         },
+        "source_modes": {
+            "patents_real": config.ENABLE_PATENTS_REAL,
+            "startups_real": config.ENABLE_STARTUPS_REAL,
+            "social_real": config.ENABLE_SOCIAL_REAL,
+            "blog_real": config.ENABLE_BLOG_REAL,
+            "allow_simulated_fallback": config.ALLOW_SIMULATED_SOURCES,
+        },
         "telegram": telegram_bot.get_stats() if telegram_bot else {},
-        "last_updated": datetime.utcnow().isoformat(),
+        "last_updated": datetime.now(timezone.utc).isoformat(),
     }
+
+@router.get("/dashboard/premium-context", response_model=DashboardPremiumContextResponse)
+async def get_dashboard_premium_context():
+    """Backend-derived context for premium dashboard panels."""
+    trends = []
+    if reasoning_agent and reasoning_agent.trends:
+        trends = sorted(
+            reasoning_agent.trends.values(),
+            key=lambda t: t.emergence_score,
+            reverse=True,
+        )
+    elif reasoning_agent:
+        trends = await reasoning_agent.analyze_trends()
+
+    top = trends[0] if trends else None
+    technique = top.technique_name if top else "Autonomous Research Discovery"
+    papers = top.paper_count if top else 0
+    confidence = float(top.confidence if top else 0.74)
+
+    location = (
+        "Distributed Lab (Cloud + Device)"
+        if config.STATE_STORE_BACKEND == "redis"
+        else "Local Research Runtime"
+    )
+    next_meeting = f"Trend Review: {technique} ({'6' if top and top.mainstream_eta_months <= 6 else '12/24'} month horizon)"
+    reasoning_points = [
+        f"Top ranked technique is '{technique}' from live trend analysis",
+        f"Cross-source evidence includes {papers} papers and {top.github_stars if top else 0} GitHub stars",
+        f"Current backend mode: DB={config.DB_BACKEND}, Bus={config.MESSAGE_BUS_BACKEND}, State={config.STATE_STORE_BACKEND}",
+    ]
+    source_modes = {
+        "patents_real": config.ENABLE_PATENTS_REAL,
+        "startups_real": config.ENABLE_STARTUPS_REAL,
+        "social_real": config.ENABLE_SOCIAL_REAL,
+        "blog_real": config.ENABLE_BLOG_REAL,
+        "allow_simulated_fallback": config.ALLOW_SIMULATED_SOURCES,
+    }
+    return DashboardPremiumContextResponse(
+        location=location,
+        focus=technique,
+        next_meeting=next_meeting,
+        author_name="Top Signal Cluster",
+        papers_count=papers,
+        confidence=confidence,
+        reasoning_points=reasoning_points,
+        source_modes=source_modes,
+    )
+
+
+async def _run_ingestion_pipeline(req: IngestRequest) -> dict:
+    """Execute the full ingest → analyze → broadcast pipeline.
+
+    Returns a result dict regardless of whether it was awaited inline or
+    scheduled as a background task. Updates the shared `_ingestion_status`
+    so polling clients can observe progress.
+    """
+    global _ingestion_status
+    _ingestion_status = {
+        "state": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+        "signals_ingested": 0,
+        "trends_updated": 0,
+        "error": None,
+    }
+
+    try:
+        signals = await ingestion_agent.run_ingestion(
+            source=req.source, category=req.category
+        )
+
+        if database:
+            for s in signals:
+                database.save_signal(s.model_dump(mode="json"))
+
+        trends_count = 0
+        if reasoning_agent:
+            trends = await reasoning_agent.analyze_trends()
+            trends_count = len(reasoning_agent.trends)
+            if database:
+                for t in trends:
+                    database.save_trend(t.model_dump(mode="json"))
+            if telegram_bot:
+                for t in trends[:3]:
+                    if t.impact_score >= config.IMPACT_HIGH_THRESHOLD:
+                        await telegram_bot.send_trend_alert(
+                            technique=t.technique_name,
+                            score=t.emergence_score,
+                            eta=t.mainstream_eta_months,
+                        )
+
+        await broadcast_ws("ingestion_complete", {
+            "count": len(signals),
+            "source": req.source,
+            "signals": [
+                {
+                    "id": s.id,
+                    "source": s.source.value,
+                    "title": s.title,
+                    "novelty_score": s.novelty_score,
+                    "url": s.url,
+                }
+                for s in signals[:20]
+            ],
+        })
+
+        if telegram_bot:
+            arxiv_count = sum(1 for s in signals if s.source.value == "arxiv")
+            github_count = sum(1 for s in signals if s.source.value == "github")
+            await telegram_bot.send_ingestion_summary(arxiv_count, github_count)
+
+        result = {
+            "status": "success",
+            "signals_ingested": len(signals),
+            "trends_updated": trends_count,
+        }
+        _ingestion_status = {
+            "state": "completed",
+            "started_at": _ingestion_status["started_at"],
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "signals_ingested": len(signals),
+            "trends_updated": trends_count,
+            "error": None,
+        }
+        return result
+    except Exception as e:
+        logger.exception("Ingestion pipeline failed")
+        _ingestion_status = {
+            "state": "failed",
+            "started_at": _ingestion_status["started_at"],
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "signals_ingested": 0,
+            "trends_updated": 0,
+            "error": str(e),
+        }
+        raise
 
 
 @router.post("/ingest")
 async def trigger_ingestion(req: IngestRequest):
-    """Trigger a manual ingestion run."""
+    """Trigger a manual ingestion run.
+
+    With `background=True`, schedules the run on the event loop and returns
+    immediately with status="started" so the mobile UI can show a banner and
+    poll `/api/ingest/status` for completion. Otherwise runs inline (used by
+    integration tests and curl smoke tests).
+    """
     if not ingestion_agent:
         raise HTTPException(status_code=503, detail="Ingestion agent not ready")
 
-    # Run ingestion
-    signals = await ingestion_agent.run_ingestion(
-        source=req.source, category=req.category
-    )
-
-    # Save to database
-    if database:
-        for s in signals:
-            database.save_signal(s.model_dump(mode="json"))
-
-    # Run trend analysis after ingestion
-    if reasoning_agent:
-        trends = await reasoning_agent.analyze_trends()
-        if database:
-            for t in trends:
-                database.save_trend(t.model_dump(mode="json"))
-
-    # Broadcast to WebSocket clients
-    await broadcast_ws("ingestion_complete", {
-        "count": len(signals),
-        "source": req.source,
-        "signals": [
-            {
-                "id": s.id,
-                "source": s.source.value,
-                "title": s.title,
-                "novelty_score": s.novelty_score,
-                "url": s.url,
+    if req.background:
+        if _ingestion_status.get("state") == "running":
+            return {
+                "status": "already_running",
+                "started_at": _ingestion_status.get("started_at"),
             }
-            for s in signals[:20]
-        ],
-    })
+        asyncio.create_task(_run_ingestion_pipeline(req))
+        return {
+            "status": "started",
+            "message": "Ingestion is running in the background. Poll /api/ingest/status.",
+        }
 
-    # Send Telegram notification
-    if telegram_bot:
-        arxiv_count = sum(1 for s in signals if s.source.value == "arxiv")
-        github_count = sum(1 for s in signals if s.source.value == "github")
-        await telegram_bot.send_ingestion_summary(arxiv_count, github_count)
+    return await _run_ingestion_pipeline(req)
 
-    return {
-        "status": "success",
-        "signals_ingested": len(signals),
-        "trends_updated": len(reasoning_agent.trends) if reasoning_agent else 0,
-    }
+
+@router.get("/ingest/status")
+async def get_ingestion_status():
+    """Return the state of the last/in-flight ingestion run."""
+    return _ingestion_status
 
 
 @router.get("/trends")
@@ -212,7 +417,14 @@ async def get_trends(limit: int = Query(default=20, le=100)):
 
 
 @router.get("/trends/{trend_id}")
-async def get_trend_detail(trend_id: str):
+async def get_trend_detail(
+    trend_id: str,
+    include_brief: bool = Query(
+        default=False,
+        description="When true, runs Gemini to generate technical_brief (slow). "
+        "Omit or false for instant scores + description.",
+    ),
+):
     """Get detailed view of a specific trend."""
     if not reasoning_agent:
         raise HTTPException(status_code=503, detail="Reasoning agent not ready")
@@ -221,13 +433,14 @@ async def get_trend_detail(trend_id: str):
     if not trend:
         raise HTTPException(status_code=404, detail="Trend not found")
 
-    # Generate technical brief
-    brief = await reasoning_agent.generate_technical_brief(
-        trend.technique_name, trend.description
-    )
-
     result = trend.model_dump(mode="json")
-    result["technical_brief"] = brief
+    if include_brief:
+        brief = await reasoning_agent.generate_technical_brief(
+            trend.technique_name, trend.description
+        )
+        result["technical_brief"] = brief
+    else:
+        result["technical_brief"] = None
     return result
 
 
@@ -248,6 +461,11 @@ async def generate_blueprint(req: BlueprintRequest):
     # Store in memory agent
     if memory_agent:
         memory_agent.store_blueprint(blueprint.id, blueprint.model_dump(mode="json"))
+    if database:
+        try:
+            database.save_blueprint(blueprint.model_dump(mode="json"))
+        except Exception as e:
+            logger.warning("blueprint persist failed: %s", e)
 
     await broadcast_ws("blueprint_generated", {
         "id": blueprint.id,
@@ -291,14 +509,89 @@ async def generate_pipeline(req: PipelineRequest):
 
     if memory_agent:
         memory_agent.store_pipeline(pipeline.model_dump(mode="json"))
+    if database:
+        database.save_pipeline(pipeline.model_dump(mode="json"))
 
     await broadcast_ws("pipeline_generated", {
         "id": pipeline.id,
         "technique": pipeline.technique_name,
         "task_type": pipeline.task_type,
     })
+    if telegram_bot:
+        await telegram_bot.send_pipeline_complete(
+            technique=pipeline.technique_name,
+            task_type=pipeline.task_type,
+            metrics=pipeline.metrics,
+            colab_url=pipeline.colab_url,
+        )
 
     return pipeline.model_dump(mode="json")
+
+
+@router.post("/pipelines/{pipeline_id}/run")
+async def run_pipeline(pipeline_id: str, req: PipelineRunRequest, x_api_key: Optional[str] = Header(default=None)):
+    """Execute a generated pipeline script."""
+    _assert_admin_api_key(x_api_key)
+    if not pipeline_generator or not pipeline_executor:
+        raise HTTPException(status_code=503, detail="Pipeline services not ready")
+
+    pipeline = pipeline_generator.get_pipeline(pipeline_id)
+    if not pipeline:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+
+    timeout = min(max(req.timeout_seconds, 30), 7200)
+    pipeline.status = "training"
+    pipeline_generator.update_pipeline(pipeline)
+    if database:
+        database.save_pipeline(pipeline.model_dump(mode="json"))
+
+    if req.wait_for_completion:
+        run = await pipeline_executor.execute_pipeline(pipeline, timeout_seconds=timeout)
+    else:
+        run = pipeline_executor.execute_pipeline_async(pipeline, timeout_seconds=timeout)
+
+    _apply_run_snapshot_to_pipeline(pipeline, run)
+    pipeline_generator.update_pipeline(pipeline)
+    if database:
+        database.save_pipeline(pipeline.model_dump(mode="json"))
+        database.save_pipeline_run(run)
+
+    await broadcast_ws("pipeline_run_started", {
+        "pipeline_id": pipeline.id,
+        "run_id": run["run_id"],
+        "status": run["status"],
+        "technique": pipeline.technique_name,
+    })
+
+    return {
+        "status": "accepted" if run["status"] in ("queued", "running") else "finished",
+        "pipeline": pipeline.model_dump(mode="json"),
+        "run": run,
+    }
+
+@router.post("/pipelines/dataset-candidates")
+async def pipeline_dataset_candidates(req: PipelineDatasetCandidatesRequest):
+    """Preview ranked dataset candidates before pipeline generation."""
+    if not pipeline_generator:
+        raise HTTPException(status_code=503, detail="Pipeline generator not ready")
+    candidates = pipeline_generator.dataset_candidates(
+        technique_name=req.technique_name,
+        description=req.description,
+        task_type=req.task_type,
+        top_k=min(max(req.top_k, 1), 20),
+    )
+    return {"candidates": candidates, "count": len(candidates)}
+
+@router.post("/experiments/design")
+async def design_experiment(req: ExperimentDesignRequest):
+    """Generate a minimal viable experiment design for a technique."""
+    if not experiment_designer:
+        raise HTTPException(status_code=503, detail="Experiment designer not ready")
+    exp = await experiment_designer.design_experiment(
+        technique_name=req.technique_name,
+        brief=req.brief,
+    )
+    return exp
 
 
 @router.get("/pipelines")
@@ -319,6 +612,72 @@ async def get_pipeline(pipeline_id: str):
     if not pl:
         raise HTTPException(status_code=404, detail="Pipeline not found")
     return pl.model_dump(mode="json")
+
+
+@router.get("/pipelines/{pipeline_id}/runs")
+async def list_pipeline_runs(pipeline_id: str):
+    """List runs for a pipeline."""
+    if not pipeline_generator or not pipeline_executor:
+        raise HTTPException(status_code=503, detail="Pipeline services not ready")
+    pipeline = pipeline_generator.get_pipeline(pipeline_id)
+    if not pipeline:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    runs = pipeline_executor.list_runs(pipeline_id)
+    if not runs and database:
+        runs = database.get_pipeline_runs(pipeline_id)
+    return {"pipeline_id": pipeline_id, "runs": runs, "count": len(runs)}
+
+
+@router.get("/pipelines/{pipeline_id}/runs/{run_id}")
+async def get_pipeline_run(pipeline_id: str, run_id: str):
+    """Get run status for a specific pipeline run."""
+    if not pipeline_generator or not pipeline_executor:
+        raise HTTPException(status_code=503, detail="Pipeline services not ready")
+    pipeline = pipeline_generator.get_pipeline(pipeline_id)
+    if not pipeline:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+
+    run = pipeline_executor.get_run(pipeline_id, run_id)
+    if not run and database:
+        run = database.get_pipeline_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    _apply_run_snapshot_to_pipeline(pipeline, run)
+    pipeline_generator.update_pipeline(pipeline)
+    if database:
+        database.save_pipeline(pipeline.model_dump(mode="json"))
+        database.save_pipeline_run(run)
+
+    return run
+
+
+@router.get("/pipelines/{pipeline_id}/runs/{run_id}/log")
+async def get_pipeline_run_log(pipeline_id: str, run_id: str, tail_lines: int = Query(default=200, ge=10, le=2000)):
+    """Read latest log lines for a pipeline run."""
+    if not pipeline_generator or not pipeline_executor:
+        raise HTTPException(status_code=503, detail="Pipeline services not ready")
+    pipeline = pipeline_generator.get_pipeline(pipeline_id)
+    if not pipeline:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    run = pipeline_executor.get_run(pipeline_id, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    try:
+        with open(run["log_path"], "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        lines = []
+
+    sliced = lines[-tail_lines:]
+    return {
+        "pipeline_id": pipeline_id,
+        "run_id": run_id,
+        "status": run["status"],
+        "line_count": len(sliced),
+        "log_tail": "".join(sliced),
+    }
 
 
 @router.post("/search")

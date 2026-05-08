@@ -2,6 +2,7 @@ package com.vectorminds.core.skills.di
 
 import com.vectorminds.core.network.VectorMindsApi
 import com.vectorminds.core.skills.AlertSkill
+import com.vectorminds.core.skills.AuthorContextSkill
 import com.vectorminds.core.skills.BlueprintGeneratorSkill
 import com.vectorminds.core.skills.PipelineLauncherSkill
 import com.vectorminds.core.skills.Skill
@@ -35,4 +36,9 @@ object SkillsModule {
     @IntoSet
     fun provideAlertSkill(api: VectorMindsApi): Skill =
         AlertSkill(api)
+
+    @Provides
+    @IntoSet
+    fun provideAuthorContextSkill(): Skill =
+        AuthorContextSkill()
 }

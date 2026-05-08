@@ -142,12 +142,14 @@ class VectorStore:
                 ]
             )
 
-        results = self.client.search(
+        response = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=top_k,
             query_filter=query_filter,
+            with_payload=True,
         )
+        results = response.points
 
         return [
             {
@@ -196,33 +198,40 @@ class VectorStore:
         # Adjust k if we have fewer points
         actual_k = min(k, count)
 
-        results = self.client.search(
+        response = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=embedding,
+            query=embedding,
             limit=actual_k,
+            with_payload=False,
         )
+        results = response.points
 
         if not results:
             return 1.0
 
-        # Cosine distance = 1 - cosine_similarity
-        # Qdrant returns similarity scores for cosine distance
-        distances = [1.0 - r.score for r in results]
+        # Cosine distance = 1 - cosine_similarity. For unit-normalized embeddings
+        # this is in [0, 2] but in practice [0, ~0.6] dominates within a topic.
+        distances = [max(0.0, min(2.0, 1.0 - float(r.score))) for r in results]
 
         d_mean = float(np.mean(distances))
         d_min = float(np.min(distances))
 
-        # Weighted combination
+        # Weighted combination of mean+min distance (Section 4.2).
         raw_novelty = (
             config.NOVELTY_MEAN_WEIGHT * d_mean
             + config.NOVELTY_MIN_WEIGHT * d_min
         )
 
-        # Normalize to [0, 1] using sigmoid-like mapping
-        # In production, would use empirical distribution over last 30 days
-        novelty = min(1.0, max(0.0, raw_novelty * 5.0))  # Scale factor for visibility
+        # Map raw distance into [0, 1] via a sigmoid centred at d=0.30. Below
+        # ~0.05 distance the novelty drops near 0; above ~0.55 it approaches 1
+        # but does not saturate the entire batch like the previous 5x linear
+        # scale did.
+        center = 0.30
+        slope = 8.0
+        z = slope * (raw_novelty - center)
+        novelty = 1.0 / (1.0 + 2.718281828 ** (-z))
 
-        return round(novelty, 4)
+        return round(float(min(1.0, max(0.0, novelty))), 4)
 
     def get_all_payloads(self, limit: int = 1000) -> list[dict]:
         """Retrieve all stored payloads (for trend computation)."""

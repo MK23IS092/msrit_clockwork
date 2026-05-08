@@ -1,11 +1,12 @@
 """Product Blueprint Engine — Generates startup-ready product briefs.
 
 Takes a high-scoring technique and generates a complete product blueprint
-using LLM (Groq free tier) or mock data for demo.
+using LLM (Gemini) or mock data for demo.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -17,6 +18,93 @@ from ingestion.schema import ProductBlueprint, TrendEntry
 import config
 
 logger = logging.getLogger("vectorminds.blueprint")
+
+
+def _coerce_text(value, indent: int = 0) -> str:
+    """Coerce a Gemini value (string|list|dict|number|None) into a readable string.
+
+    Lists become bullet lines; dicts become "Key:\\n  - item" sections. Used because
+    the LLM sometimes returns nested objects for fields the schema types as ``str``.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    pad = "  " * indent
+    if isinstance(value, list):
+        return "\n".join(f"{pad}- {_coerce_text(v, indent + 1).lstrip()}" for v in value)
+    if isinstance(value, dict):
+        chunks = []
+        for k, v in value.items():
+            label = str(k).replace("_", " ").strip()
+            inner = _coerce_text(v, indent + 1)
+            if "\n" in inner or (isinstance(v, (list, dict))):
+                chunks.append(f"{pad}{label}:\n{inner}")
+            else:
+                chunks.append(f"{pad}{label}: {inner}")
+        return "\n".join(chunks)
+    return str(value)
+
+
+def _coerce_str_list(value) -> list[str]:
+    """Force a value into a list[str], coercing nested dicts/lists to readable lines."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [_coerce_text(v).strip() for v in value if v is not None]
+    if isinstance(value, dict):
+        return [f"{k}: {_coerce_text(v).strip()}" for k, v in value.items()]
+    return [str(value)]
+
+
+def _repair_truncated_json(text: str) -> Optional[dict]:
+    """Best-effort recovery of a truncated JSON object from a Gemini response.
+
+    Closes any open string, then closes any unbalanced ``[`` / ``{`` brackets,
+    in stack order. Returns ``None`` if the result still does not parse.
+    """
+    if not text:
+        return None
+    s = text.strip()
+    if not s.startswith("{"):
+        start = s.find("{")
+        if start == -1:
+            return None
+        s = s[start:]
+
+    in_str = False
+    escape = False
+    stack: list[str] = []
+    for ch in s:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]" and stack and stack[-1] == ch:
+            stack.pop()
+
+    repaired = s
+    if in_str:
+        repaired += '"'
+    while stack:
+        repaired += stack.pop()
+
+    repaired = repaired.rstrip(",")
+    try:
+        return json.loads(repaired)
+    except Exception:
+        return None
 
 # ─── Mock Blueprints for Demo ─────────────────────────────────
 MOCK_BLUEPRINTS = {
@@ -120,7 +208,7 @@ class BlueprintEngine:
         """
         logger.info(f"Generating blueprint for: {trend.technique_name}")
 
-        if config.USE_MOCK_LLM or not config.GROQ_API_KEY:
+        if config.USE_MOCK_LLM or not config.LLM_API_KEY:
             blueprint = self._generate_mock_blueprint(trend)
         else:
             blueprint = await self._generate_llm_blueprint(trend, additional_context)
@@ -132,7 +220,7 @@ class BlueprintEngine:
     async def _generate_llm_blueprint(
         self, trend: TrendEntry, context: str
     ) -> ProductBlueprint:
-        """Generate blueprint using Groq LLM."""
+        """Generate blueprint using Gemini LLM."""
         prompt = (
             f"Generate a complete startup product blueprint based on this "
             f"emerging AI technique:\n\n"
@@ -151,48 +239,95 @@ class BlueprintEngine:
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    f"{config.GROQ_BASE_URL}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {config.GROQ_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": config.LLM_MODEL,
-                        "messages": [
-                            {
-                                "role": "system",
-                                "content": (
-                                    "You are a senior product strategist and AI architect. "
-                                    "Generate detailed, actionable product blueprints. "
-                                    "Respond in valid JSON only."
-                                ),
-                            },
-                            {"role": "user", "content": prompt},
-                        ],
-                        "max_tokens": 2000,
-                        "temperature": 0.7,
-                        "response_format": {"type": "json_object"},
-                    },
+                full_prompt = (
+                    "You are a senior product strategist and AI architect. "
+                    "Generate detailed, actionable product blueprints.\n"
+                    "Return ONLY valid JSON with these keys: "
+                    "problem_statement, market_size, technical_implementation, "
+                    "architecture_decisions, differentiation_strategy, dataset_requirements, "
+                    "go_to_market, risk_assessment, first_90_day_milestones, suggested_stack.\n\n"
+                    f"{prompt}"
                 )
+                payload = {
+                    "contents": [{"parts": [{"text": full_prompt}]}],
+                    "generationConfig": {
+                        "temperature": 0.7,
+                        "maxOutputTokens": 8192,
+                        "responseMimeType": "application/json",
+                    },
+                }
+
+                # Gemini occasionally returns 503/overloaded. Retry with simple
+                # exponential backoff (3 attempts, 1.5s/3s/6s) before falling
+                # back to the mock template.
+                resp = None
+                last_exc: Optional[Exception] = None
+                for attempt, delay in enumerate((1.5, 3.0, 6.0), start=1):
+                    try:
+                        resp = await client.post(
+                            f"{config.GEMINI_BASE_URL}/models/{config.LLM_MODEL}:generateContent",
+                            params={"key": config.LLM_API_KEY},
+                            headers={"Content-Type": "application/json"},
+                            json=payload,
+                        )
+                        if resp.status_code in (500, 502, 503, 504, 429):
+                            logger.warning(
+                                "Gemini blueprint attempt %s returned %s; retrying",
+                                attempt,
+                                resp.status_code,
+                            )
+                            last_exc = httpx.HTTPStatusError(
+                                f"Gemini transient {resp.status_code}",
+                                request=resp.request,
+                                response=resp,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        last_exc = None
+                        break
+                    except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
+                        last_exc = e
+                        logger.warning("Gemini blueprint network error attempt %s: %s", attempt, e)
+                        await asyncio.sleep(delay)
+                        continue
+                if resp is None or last_exc is not None:
+                    if last_exc is not None:
+                        raise last_exc
+                    raise RuntimeError("Gemini blueprint: no response")
                 resp.raise_for_status()
                 data = resp.json()
-                content = data["choices"][0]["message"]["content"]
-                bp_data = json.loads(content)
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    raise ValueError("No Gemini candidates returned")
+                finish_reason = candidates[0].get("finishReason", "")
+                parts = candidates[0].get("content", {}).get("parts", [])
+                content = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+                if not content:
+                    raise ValueError("Empty Gemini response text")
+                try:
+                    bp_data = json.loads(content)
+                except json.JSONDecodeError as je:
+                    if finish_reason == "MAX_TOKENS":
+                        logger.warning(
+                            "Gemini blueprint truncated by MAX_TOKENS; attempting repair"
+                        )
+                    bp_data = _repair_truncated_json(content)
+                    if bp_data is None:
+                        raise je
 
                 return ProductBlueprint(
                     technique_name=trend.technique_name,
                     trend_id=trend.id,
-                    problem_statement=bp_data.get("problem_statement", ""),
-                    market_size=bp_data.get("market_size", ""),
-                    technical_implementation=bp_data.get("technical_implementation", ""),
-                    architecture_decisions=bp_data.get("architecture_decisions", []),
-                    differentiation_strategy=bp_data.get("differentiation_strategy", ""),
-                    dataset_requirements=bp_data.get("dataset_requirements", ""),
-                    go_to_market=bp_data.get("go_to_market", ""),
-                    risk_assessment=bp_data.get("risk_assessment", ""),
-                    first_90_day_milestones=bp_data.get("first_90_day_milestones", []),
-                    suggested_stack=bp_data.get("suggested_stack", []),
+                    problem_statement=_coerce_text(bp_data.get("problem_statement", "")),
+                    market_size=_coerce_text(bp_data.get("market_size", "")),
+                    technical_implementation=_coerce_text(bp_data.get("technical_implementation", "")),
+                    architecture_decisions=_coerce_str_list(bp_data.get("architecture_decisions", [])),
+                    differentiation_strategy=_coerce_text(bp_data.get("differentiation_strategy", "")),
+                    dataset_requirements=_coerce_text(bp_data.get("dataset_requirements", "")),
+                    go_to_market=_coerce_text(bp_data.get("go_to_market", "")),
+                    risk_assessment=_coerce_text(bp_data.get("risk_assessment", "")),
+                    first_90_day_milestones=_coerce_str_list(bp_data.get("first_90_day_milestones", [])),
+                    suggested_stack=_coerce_str_list(bp_data.get("suggested_stack", [])),
                 )
         except Exception as e:
             logger.error(f"LLM blueprint generation failed: {e}")

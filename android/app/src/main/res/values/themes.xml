@@ -1,7 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+        Sets an explicit opaque navy background so the Android 12+ system
+        splash screen stops showing the launcher icon on top of an
+        otherwise transparent windowBackground. Without this, on slow
+        emulator first frames the V/A launcher icon appears stuck.
+
+        ``windowSplashScreenBackground`` is the Android 12+ splash colour;
+        guarded by ``tools:targetApi`` since it is only used on API 31+.
+    -->
     <style name="Theme.VectorMinds" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:colorBackground">@color/window_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">@color/window_background</item>
     </style>
 </resources>

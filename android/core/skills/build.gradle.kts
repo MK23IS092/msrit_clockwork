@@ -45,4 +45,8 @@ dependencies {
     // Project modules
     implementation(project(":core:data"))
     implementation(project(":core:network"))
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockk)
 }

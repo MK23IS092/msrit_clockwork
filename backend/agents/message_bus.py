@@ -12,9 +12,15 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Callable, Optional
 
+import config
 from ingestion.schema import AgentEvent
 
 logger = logging.getLogger("vectorminds.messagebus")
+
+try:
+    from aiokafka import AIOKafkaProducer
+except Exception:  # pragma: no cover - optional dependency
+    AIOKafkaProducer = None
 
 
 class MessageBus:
@@ -33,6 +39,25 @@ class MessageBus:
         self._handlers: dict[str, list[Callable]] = defaultdict(list)
         self._event_log: list[AgentEvent] = []
         self._running = False
+        self._producer = None
+        self._mirror_enabled = (
+            config.MESSAGE_BUS_BACKEND == "kafka_mirror" and AIOKafkaProducer is not None
+        )
+
+    async def start(self):
+        """Start optional Kafka mirror producer."""
+        if self._mirror_enabled and self._producer is None:
+            self._producer = AIOKafkaProducer(
+                bootstrap_servers=config.KAFKA_BOOTSTRAP_SERVERS,
+            )
+            await self._producer.start()
+            logger.info("Message bus Kafka mirror producer started")
+
+    async def stop(self):
+        """Stop optional Kafka producer."""
+        if self._producer is not None:
+            await self._producer.stop()
+            self._producer = None
 
     def subscribe(self, topic: str) -> asyncio.Queue:
         """Subscribe to a topic and get a queue for receiving events.
@@ -76,6 +101,20 @@ class MessageBus:
                 await handler(event)
             except Exception as e:
                 logger.error(f"Handler error for topic '{event.topic}': {e}")
+
+        # Mirror events to Kafka if enabled.
+        if self._producer is not None:
+            kafka_topic = (
+                f"{config.KAFKA_TOPIC_PREFIX}."
+                f"{event.topic.replace('.', '_')}"
+            )
+            try:
+                await self._producer.send_and_wait(
+                    kafka_topic,
+                    event.model_dump_json().encode("utf-8"),
+                )
+            except Exception as e:
+                logger.error(f"Kafka mirror publish error for '{kafka_topic}': {e}")
 
         logger.debug(
             f"Published event: topic='{event.topic}', "
