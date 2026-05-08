@@ -5,12 +5,34 @@ VectorMind is a research-intelligence platform with:
 - a Python FastAPI backend (`backend/`) for ingestion, ranking, blueprints, and pipeline generation
 - an Android client (`android/`) for dashboard, trends, blueprints, and pipeline views
 
+## Hackathon Submission — Quick Links
+
+| Deliverable | Link |
+| --- | --- |
+| **Android APK** (60 MB, hosted backend URL baked in) | [Direct download](https://github.com/MK23IS092/msrit_clockwork/raw/main/dist/vectormind-judges.apk) |
+| **Full source archive** (zip — includes code + APK) | [v1.0.0.zip](https://github.com/MK23IS092/msrit_clockwork/archive/refs/tags/v1.0.0.zip) |
+| **Demo video** | [`product_demo.mp4`](./product_demo.mp4) |
+| **Presentation** | [`Clockwork_MSRIT.pdf`](./Clockwork_MSRIT.pdf) |
+| **AI Disclosure** | [`OpenClaw_AI_Disclosure (1) (1).docx`](./OpenClaw_AI_Disclosure%20%281%29%20%281%29.docx) |
+| **Hosted backend (live)** | https://teletubbies-zamzung.hf.space — see [`/health`](https://teletubbies-zamzung.hf.space/health) and [`/docs`](https://teletubbies-zamzung.hf.space/docs) |
+
+### Installing the APK on Android
+
+1. On your Android phone, open the [Direct download](https://github.com/MK23IS092/msrit_clockwork/raw/main/dist/vectormind-judges.apk) link.
+2. Allow the browser/file manager to install from unknown sources when prompted.
+3. Open **VectorMind**. The app talks to the hosted backend automatically — no manual configuration needed.
+
 ## Repository Layout
 
 - `backend/` FastAPI app, agents, ingestion, vector search, intelligence engines
 - `android/` multi-module Android app (`app`, `core:network`, `core:data`, `core:skills`, `core:service`)
-- `REMAINING_WORK.md` delivery checklist
-- `VectorMind_Ultimate.md` and hackathon report document for project context
+- `dist/vectormind-judges.apk` ready-to-install Android build with `BACKEND_URL` baked in
+- `Clockwork_MSRIT.pdf` submission presentation
+- `OpenClaw_AI_Disclosure (1) (1).docx` AI disclosure document
+- `product_demo.mp4` walkthrough video
+- `docker-compose.yml` Postgres + Redis + Kafka stack for local development
+- `docs/DEPLOY.md` Hugging Face + GitHub Actions deployment guide
+- `docs/FEATURE_MATRIX.md` feature checklist
 
 ## Quick Start
 
