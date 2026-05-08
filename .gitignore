@@ -17,3 +17,6 @@ android/**/build/
 # Environment files
 .env
 backend/.env
+
+# Built APKs (staged locally for sharing; CI artifacts/releases are the source of truth)
+*.apk
