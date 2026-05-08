@@ -7,11 +7,11 @@ name: Build & release Android APK
 on:
   push:
     branches: [main]
-    paths:
-      - 'android/**'
-      - 'gradle/**'
-      - '.github/workflows/android-release.yml'
     tags: ['v*']
+    # Intentionally no `paths` filter: combining `paths` with `tags` makes
+    # tag pushes silently skip when the tagged commit doesn't touch the
+    # filtered paths. Gradle caching keeps the build fast even when the
+    # diff is small.
   workflow_dispatch:
     inputs:
       backend_url:
@@ -40,6 +40,11 @@ jobs:
 
       - name: Set up Gradle (with cache)
         uses: gradle/actions/setup-gradle@v4
+
+      # gradlew gets committed from a Windows checkout without the executable
+      # bit; reapply it on the Linux runner so `./gradlew` is invokable.
+      - name: Make gradlew executable
+        run: chmod +x gradlew
 
       - name: Resolve BACKEND_URL
         id: resolve
