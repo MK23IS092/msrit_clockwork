@@ -6,7 +6,7 @@
 | --- | --- |
 | **Backend** | FastAPI, multi-agent orchestration, embeddings, vector search, LLM-assisted blueprints, Telegram delivery |
 | **Mobile** | Kotlin, Compose, Material 3, MVVM, Hilt, Retrofit, Room, DataStore, WorkManager |
-| **Hosted API** | Public Space deployment (see [Live backend](#live-backend) below) |
+| **Hosted API** | Public Space deployment (see [Live backend](https://huggingface.co/spaces/teletubbies/zamzung/tree/main) below) |
 | **Judges** | Pre-built APK with production `BACKEND_URL`; optional local run via Docker Compose |
 
 ---
@@ -18,6 +18,22 @@ The walkthrough plays inline below when the README is viewed on GitHub. No downl
 <video src="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/product_demo.mp4" controls muted preload="metadata" width="100%"></video>
 
 If your viewer does not render embedded video (some markdown previews and IDE viewers do not), use the [stream / download link](https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/product_demo.mp4) in the [Submission bundle](#submission-bundle) table.
+
+---
+
+## Application screenshots
+
+Captures from the production Android client running against the hosted backend at `https://teletubbies-zamzung.hf.space`. Images render inline directly in the GitHub README.
+
+| Command Center | Research Galaxy | Trend Leaderboard |
+| :---: | :---: | :---: |
+| <img alt="Command Center overview with KPI tiles, situation model, and reasoning confidence" width="280" src="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/application_images/command-center-overview.jpeg" /> | <img alt="Research Galaxy live cluster projection and ingestion controls" width="280" src="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/application_images/command-center-galaxy.jpeg" /> | <img alt="Trend Leaderboard ranking emerging AI techniques by emergence score" width="280" src="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/application_images/trend-leaderboard.jpeg" /> |
+| KPI tiles, live situation model, and 79% reasoning-confidence bar over the Attention Mechanism trend. | 30-cluster live projection with hot-signal callouts and one-tap ingestion sync. | Ranked trends with sparklines, per-source filters (arXiv, GitHub, Patents) and semantic search. |
+
+| Product Blueprints | ML Pipelines | Generated Colab notebook |
+| :---: | :---: | :---: |
+| <img alt="Investor-grade product blueprints generated from emerging research techniques" width="280" src="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/application_images/product-blueprints.jpeg" /> | <img alt="Generated ML pipelines with model and dataset metadata and Open in Colab buttons" width="280" src="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/application_images/ml-pipelines.jpeg" /> | <img alt="Generated VectorMind autonomous pipeline notebook opened in Google Colab" width="280" src="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/application_images/generated-colab-pipeline.jpeg" /> |
+| Investor-grade dossiers synthesised from market context, technique novelty, and feasibility signals. | Auto-generated pipelines (technique, task type, dataset, model) with one-tap launch into Google Colab. | Reproducible Colab notebook (`vectormind_pipeline.ipynb`) emitted by the backend with dataset, model and trainer cells pre-wired. |
 
 ---
 
