@@ -30,6 +30,11 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 LLM_API_KEY = GEMINI_API_KEY or os.getenv("GROQ_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+# Long-polling (getUpdates): only ONE process per bot token may poll. If you run
+# Hugging Face + local backend with the same TELEGRAM_BOT_TOKEN, set this to
+# "false" on one side (outbound send_message still works; /start and commands
+# need exactly one poller).
+TELEGRAM_ENABLE_POLLING = os.getenv("TELEGRAM_ENABLE_POLLING", "true").lower() == "true"
 HUGGINGFACE_TOKEN = os.getenv("HUGGINGFACE_TOKEN", "")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")  # optional, for higher rate limits
 KAGGLE_USERNAME = os.getenv("KAGGLE_USERNAME", "")

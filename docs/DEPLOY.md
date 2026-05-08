@@ -56,6 +56,7 @@ Space → **Settings** → **Variables and secrets** → **New secret**:
 | `USE_MOCK_LLM`        | yes      | `false`. Default is `true` in code — must override.     |
 | `TELEGRAM_BOT_TOKEN`  | optional | Only if you want Telegram alerts.                       |
 | `TELEGRAM_CHAT_ID`    | optional | Telegram chat to notify.                                |
+| `TELEGRAM_ENABLE_POLLING` | optional | Default `true`. Set `false` if another copy of the backend (e.g. your laptop) is already polling the same bot token — otherwise Telegram returns **HTTP 409 Conflict** (`terminated by other getUpdates request`). With `false`, the Space can still **send** alerts via `sendMessage`; `/start` and commands need exactly one poller somewhere. |
 | `GITHUB_TOKEN`        | optional | Used for higher GitHub Trending API rate limits + Gist. |
 | `HUGGINGFACE_TOKEN`   | optional | Used to fetch dataset candidates from HF.               |
 | `KAGGLE_USERNAME` / `KAGGLE_KEY` | optional | Used for Kaggle dataset suggestions.        |
