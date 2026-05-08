@@ -29,6 +29,25 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
 )
+from telegram.request import HTTPXRequest
+
+# Hugging Face Spaces' first outbound call to api.telegram.org can take longer
+# than python-telegram-bot's default 5s timeout. We use generous timeouts so
+# cold-start does not trip start_polling.
+_HTTP_REQUEST_KW = dict(
+    connect_timeout=30.0,
+    read_timeout=30.0,
+    write_timeout=30.0,
+    pool_timeout=10.0,
+)
+_GETUPDATES_REQUEST_KW = dict(
+    connect_timeout=30.0,
+    # Long polling: Telegram holds the request open up to 50s, so read_timeout
+    # must exceed that.
+    read_timeout=70.0,
+    write_timeout=30.0,
+    pool_timeout=10.0,
+)
 
 import config
 
@@ -89,7 +108,7 @@ class TelegramBot:
         if self._outbound_bot is not None:
             return True
         try:
-            bot = Bot(self.token)
+            bot = Bot(self.token, request=HTTPXRequest(**_HTTP_REQUEST_KW))
             await bot.initialize()
             self._outbound_bot = bot
             return True
@@ -121,34 +140,75 @@ class TelegramBot:
                 except Exception as e:
                     logger.warning("Telegram outbound-only: getMe failed: %s", e)
             return
-        try:
-            self._app = (
-                ApplicationBuilder()
-                .token(self.token)
-                .concurrent_updates(True)
-                .build()
-            )
-            self._app.add_handler(CommandHandler("start", self._cmd_start))
-            self._app.add_handler(CommandHandler("help", self._cmd_help))
-            self._app.add_handler(CommandHandler("status", self._cmd_status))
-            self._app.add_handler(CommandHandler("trends", self._cmd_trends))
-            self._app.add_handler(CommandHandler("pipelines", self._cmd_pipelines))
-            self._app.add_handler(CommandHandler("unsubscribe", self._cmd_unsubscribe))
+        # Try a few times — Hugging Face cold-start networking is flaky for ~10-20s
+        # after the container becomes ready. Each attempt is allowed up to 30s
+        # of HTTP time via _HTTP_REQUEST_KW.
+        max_attempts = 5
+        backoff = 3.0
+        last_error: Optional[Exception] = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                self._app = (
+                    ApplicationBuilder()
+                    .token(self.token)
+                    .concurrent_updates(True)
+                    .request(HTTPXRequest(**_HTTP_REQUEST_KW))
+                    .get_updates_request(HTTPXRequest(**_GETUPDATES_REQUEST_KW))
+                    .build()
+                )
+                self._app.add_handler(CommandHandler("start", self._cmd_start))
+                self._app.add_handler(CommandHandler("help", self._cmd_help))
+                self._app.add_handler(CommandHandler("status", self._cmd_status))
+                self._app.add_handler(CommandHandler("trends", self._cmd_trends))
+                self._app.add_handler(CommandHandler("pipelines", self._cmd_pipelines))
+                self._app.add_handler(CommandHandler("unsubscribe", self._cmd_unsubscribe))
 
-            await self._app.initialize()
-            await self._app.start()
-            await self._app.updater.start_polling(drop_pending_updates=False)
-            self._polling_started = True
-            me = await self._app.bot.get_me()
-            count = self._subscriber_count()
-            logger.info(
-                "Telegram bot @%s online (subscribers=%s)", me.username, count
-            )
-        except Exception as e:
-            logger.error("Telegram polling failed to start: %s", e)
-            self.enabled = False
-            self._app = None
-            self._polling_started = False
+                await self._app.initialize()
+                await self._app.start()
+                await self._app.updater.start_polling(
+                    drop_pending_updates=False,
+                    timeout=50,
+                    bootstrap_retries=3,
+                )
+                self._polling_started = True
+                me = await self._app.bot.get_me()
+                count = self._subscriber_count()
+                logger.info(
+                    "Telegram bot @%s online (subscribers=%s, attempt=%s)",
+                    me.username, count, attempt,
+                )
+                return
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    "Telegram polling start attempt %s/%s failed: %s",
+                    attempt, max_attempts, e,
+                )
+                # Always tear down whatever was partially built so we can rebuild.
+                app = self._app
+                self._app = None
+                if app:
+                    try:
+                        if app.updater and app.updater.running:
+                            await app.updater.stop()
+                        if app.running:
+                            await app.stop()
+                        await app.shutdown()
+                    except Exception as cleanup_err:
+                        logger.debug("PTB cleanup between retries: %s", cleanup_err)
+                if attempt < max_attempts:
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 1.7, 20.0)
+
+        # All attempts exhausted — keep the bot 'enabled' so outbound alerts
+        # still work, and surface a clear log line.
+        logger.error(
+            "Telegram polling failed after %s attempts: %s. "
+            "Outbound sendMessage will still be attempted on demand.",
+            max_attempts, last_error,
+        )
+        self._polling_started = False
+        await self._ensure_outbound_bot()
 
     async def stop_polling(self) -> None:
         """Cleanly stop the polling task. Safe to call multiple times."""
