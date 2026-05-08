@@ -20,10 +20,15 @@ android {
     defaultConfig {
         minSdk = 31
         consumerProguardFiles("consumer-rules.pro")
+        // BACKEND_URL: local.properties wins; CI injects via env. Strip
+        // trailing slash so Retrofit can append it itself in NetworkModule.
+        val backendUrl: String = (localProperties["BACKEND_URL"] as String?)
+            ?: System.getenv("BACKEND_URL")
+            ?: "http://10.0.2.2:8000"
         buildConfigField(
             "String",
             "BACKEND_URL",
-            "\"${localProperties["BACKEND_URL"] ?: "http://10.0.2.2:8000"}\""
+            "\"${backendUrl.trimEnd('/')}\"",
         )
     }
 

@@ -1,84 +1,65 @@
 package com.vectorminds.app.ui.navigation
 
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.AutoGraph
+import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.LayersClear
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.TrendingUp
-import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
-import com.vectorminds.app.ui.dashboard.DashboardScreen
-import com.vectorminds.app.ui.trends.TrendListScreen
-import com.vectorminds.app.ui.trends.TrendDetailScreen
 import com.vectorminds.app.ui.blueprints.BlueprintScreen
+import com.vectorminds.app.ui.components.VmDockItem
+import com.vectorminds.app.ui.components.VmNavDock
+import com.vectorminds.app.ui.dashboard.DashboardScreen
 import com.vectorminds.app.ui.pipelines.PipelineScreen
 import com.vectorminds.app.ui.settings.SettingsScreen
+import com.vectorminds.app.ui.theme.Vm
+import com.vectorminds.app.ui.trends.TrendDetailScreen
+import com.vectorminds.app.ui.trends.TrendListScreen
 
-data class BottomNavItem(
-    val screen: Screen,
-    val label: String,
-    val icon: ImageVector
-)
-
-val bottomNavItems = listOf(
-    BottomNavItem(Screen.Dashboard, "Dashboard", Icons.Default.Dashboard),
-    BottomNavItem(Screen.Trends, "Trends", Icons.Default.TrendingUp),
-    BottomNavItem(Screen.Blueprints, "Blueprints", Icons.Default.Description),
-    BottomNavItem(Screen.Pipelines, "Pipelines", Icons.Default.Terminal),
-    BottomNavItem(Screen.Settings, "Settings", Icons.Default.Settings),
+private val DockItems = listOf(
+    VmDockItem(Screen.Dashboard.route,  "Command",   Icons.Filled.Hub),
+    VmDockItem(Screen.Trends.route,     "Trends",    Icons.Filled.Insights),
+    VmDockItem(Screen.Blueprints.route, "Blueprints",Icons.Filled.AutoGraph),
+    VmDockItem(Screen.Pipelines.route,  "Pipelines", Icons.Filled.Terminal),
+    VmDockItem(Screen.Settings.route,   "Settings",  Icons.Filled.Settings),
 )
 
 @Composable
 fun VectorMindsNavGraph(
     navController: NavHostController,
 ) {
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = backStackEntry?.destination?.route
+    val dockSelected = when {
+        currentRoute == null -> Screen.Dashboard.route
+        currentRoute.startsWith("trends") -> Screen.Trends.route
+        else -> currentRoute
+    }
+    val showDock = currentRoute != Screen.TrendDetail.route
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-            ) {
-                bottomNavItems.forEach { item ->
-                    NavigationBarItem(
-                        icon = { Icon(item.icon, contentDescription = item.label) },
-                        label = { Text(item.label, style = MaterialTheme.typography.labelSmall) },
-                        selected = currentRoute == item.screen.route,
-                        onClick = {
-                            if (currentRoute != item.screen.route) {
-                                navController.navigate(item.screen.route) {
-                                    popUpTo(Screen.Dashboard.route) { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            }
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                        )
-                    )
-                }
-            }
-        }
-    ) { innerPadding ->
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Vm.colors.background),
+    ) {
         NavHost(
             navController = navController,
             startDestination = Screen.Dashboard.route,
-            modifier = Modifier.padding(innerPadding),
+            modifier = Modifier.fillMaxSize(),
         ) {
             composable(Screen.Dashboard.route) {
                 DashboardScreen(
@@ -116,15 +97,26 @@ fun VectorMindsNavGraph(
                     },
                 )
             }
-            composable(Screen.Blueprints.route) {
-                BlueprintScreen()
-            }
-            composable(Screen.Pipelines.route) {
-                PipelineScreen()
-            }
-            composable(Screen.Settings.route) {
-                SettingsScreen()
-            }
+            composable(Screen.Blueprints.route) { BlueprintScreen() }
+            composable(Screen.Pipelines.route)  { PipelineScreen() }
+            composable(Screen.Settings.route)   { SettingsScreen() }
+        }
+
+        if (showDock) {
+            VmNavDock(
+                items = DockItems,
+                selectedKey = dockSelected,
+                onSelect = { key ->
+                    if (currentRoute != key) {
+                        navController.navigate(key) {
+                            popUpTo(Screen.Dashboard.route) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
     }
 }

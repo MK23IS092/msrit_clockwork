@@ -12,8 +12,16 @@ load_dotenv(override=True)
 
 # ─── Base Paths ───────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(exist_ok=True)
+
+# When running on Hugging Face Spaces, /data is the only writable persistent
+# mount. Falling back to backend/data keeps local dev unchanged.
+_HF_DATA = Path("/data")
+DATA_DIR = (
+    _HF_DATA
+    if os.getenv("HF_DEPLOYMENT", "").lower() == "true" and _HF_DATA.exists()
+    else BASE_DIR / "data"
+)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "vectormind.db"
 
 # ─── API Keys (ALL FREE) ─────────────────────────────────────
@@ -109,11 +117,10 @@ DEDUP_SIMILARITY_THRESHOLD = 0.95
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 API_ADMIN_KEY = os.getenv("API_ADMIN_KEY", "")
-CORS_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-]
+# Allow any origin by default. Browsers enforce CORS, the Android client
+# isn't a browser, and we don't use cookies for auth — so a permissive
+# wildcard is fine and lets judges curl the API from anywhere.
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 
 # ─── Pipeline Generator ──────────────────────────────────────
 SUPPORTED_TASK_CATEGORIES = [

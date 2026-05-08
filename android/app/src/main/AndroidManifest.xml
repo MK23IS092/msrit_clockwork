@@ -11,11 +11,11 @@
         android:name=".VectorMindsApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="VectorMinds"
+        android:label="VectorMind"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.VectorMinds"
-        android:usesCleartextTraffic="true">
+        android:networkSecurityConfig="@xml/network_security_config">
 
         <activity
             android:name=".MainActivity"
