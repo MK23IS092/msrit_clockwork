@@ -1,161 +1,177 @@
 # VectorMind
 
-VectorMind is a research-intelligence platform with:
+**VectorMind** is a research-intelligence platform that ingests multi-source AI research signals, ranks emerging techniques, generates product blueprints, and produces executable ML pipeline notebooks with Colab integration. This repository contains the production **FastAPI** backend, **Jetpack Compose** Android client, deployment automation, and hackathon submission artefacts.
 
-- a Python FastAPI backend (`backend/`) for ingestion, ranking, blueprints, and pipeline generation
-- an Android client (`android/`) for dashboard, trends, blueprints, and pipeline views
-
-## Hackathon Submission — Quick Links
-
-| Deliverable | Link |
+| Aspect | Description |
 | --- | --- |
-| **Android APK** (60 MB, hosted backend URL baked in) | [Direct download](https://github.com/MK23IS092/msrit_clockwork/raw/main/dist/vectormind-judges.apk) |
-| **Full source archive** (zip — includes code + APK) | [v1.0.0.zip](https://github.com/MK23IS092/msrit_clockwork/archive/refs/tags/v1.0.0.zip) |
-| **Demo video** | [`product_demo.mp4`](./product_demo.mp4) |
-| **Presentation** | [`Clockwork_MSRIT.pdf`](./Clockwork_MSRIT.pdf) |
-| **AI Disclosure** | [`OpenClaw_AI_Disclosure (1) (1).docx`](./OpenClaw_AI_Disclosure%20%281%29%20%281%29.docx) |
-| **Hosted backend (live)** | https://teletubbies-zamzung.hf.space — see [`/health`](https://teletubbies-zamzung.hf.space/health) and [`/docs`](https://teletubbies-zamzung.hf.space/docs) |
+| **Backend** | FastAPI, multi-agent orchestration, embeddings, vector search, LLM-assisted blueprints, Telegram delivery |
+| **Mobile** | Kotlin, Compose, Material 3, MVVM, Hilt, Retrofit, Room, DataStore, WorkManager |
+| **Hosted API** | Public Space deployment (see [Live backend](#live-backend) below) |
+| **Judges** | Pre-built APK with production `BACKEND_URL`; optional local run via Docker Compose |
 
-### Installing the APK on Android
+---
 
-1. On your Android phone, open the [Direct download](https://github.com/MK23IS092/msrit_clockwork/raw/main/dist/vectormind-judges.apk) link.
-2. Allow the browser/file manager to install from unknown sources when prompted.
-3. Open **VectorMind**. The app talks to the hosted backend automatically — no manual configuration needed.
+## Demo video
 
-## Repository Layout
+The walkthrough below plays directly in the GitHub README in most desktop browsers. If playback is unavailable in your viewer, use the download link in the [Submission bundle](#submission-bundle) table.
 
-- `backend/` FastAPI app, agents, ingestion, vector search, intelligence engines
-- `android/` multi-module Android app (`app`, `core:network`, `core:data`, `core:skills`, `core:service`)
-- `dist/vectormind-judges.apk` ready-to-install Android build with `BACKEND_URL` baked in
-- `Clockwork_MSRIT.pdf` submission presentation
-- `OpenClaw_AI_Disclosure (1) (1).docx` AI disclosure document
-- `product_demo.mp4` walkthrough video
-- `docker-compose.yml` Postgres + Redis + Kafka stack for local development
-- `docs/DEPLOY.md` Hugging Face + GitHub Actions deployment guide
-- `docs/FEATURE_MATRIX.md` feature checklist
+<video controls width="100%" playsinline preload="metadata" src="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/product_demo.mp4">
+  <a href="https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/product_demo.mp4">Download product_demo.mp4</a>
+</video>
 
-## Quick Start
+---
 
-### Backend
+## Submission bundle
+
+| Deliverable | Access |
+| --- | --- |
+| **Android APK** (debug build, hosted backend URL baked in at compile time) | [Direct install (raw)](https://github.com/MK23IS092/msrit_clockwork/raw/main/dist/vectormind-judges.apk) |
+| **Full source snapshot** (ZIP, includes repository tree and deliverables) | [v1.0.0 source archive](https://github.com/MK23IS092/msrit_clockwork/archive/refs/tags/v1.0.0.zip) |
+| **Demo video** (MP4) | [Stream / download (raw)](https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/product_demo.mp4) |
+| **Presentation** | [Clockwork_MSRIT.pdf](./Clockwork_MSRIT.pdf) |
+| **AI disclosure** | [OpenClaw_AI_Disclosure (1) (1).docx](./OpenClaw_AI_Disclosure%20%281%29%20%281%29.docx) |
+| **This README** | [README.md](./README.md) |
+
+### Installing the APK (Android)
+
+1. Open the **Direct install (raw)** link on the device.
+2. Approve installation from the browser or file manager when prompted (unknown sources).
+3. Launch the app. No manual API URL entry is required for the judge build; it targets the hosted backend below.
+
+---
+
+## Live backend
+
+| Endpoint | URL |
+| --- | --- |
+| **Base** | `https://teletubbies-zamzung.hf.space` |
+| **Health** | [`GET /health`](https://teletubbies-zamzung.hf.space/health) |
+| **OpenAPI** | [`/docs`](https://teletubbies-zamzung.hf.space/docs) |
+
+---
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `backend/` | FastAPI application, agents, ingestion, intelligence engines, tests |
+| `android/` | Gradle multi-module Android app (`app`, `core:network`, `core:data`, `core:skills`, `core:service`) |
+| `dist/vectormind-judges.apk` | Shareable debug APK aligned with hosted backend |
+| `product_demo.mp4` | Screen recording for reviewers |
+| `docker-compose.yml` | Local PostgreSQL, Redis, Kafka (optional full stack) |
+| `docs/DEPLOY.md` | Hugging Face Spaces and GitHub Actions deployment |
+| `docs/FEATURE_MATRIX.md` | Capability checklist |
+| `.github/workflows/` | CI: backend tests, Android build, HF deploy |
+
+---
+
+## Quick start (developers)
+
+### Backend (local)
 
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-Backend runs on `http://127.0.0.1:8000`.
+Default local URL: `http://127.0.0.1:8000`.
 
-### Android
+### Android (local build)
 
 ```bash
 cd android
+chmod +x gradlew   # Linux / macOS only
 ./gradlew :app:assembleDebug
 ```
 
-Set `BACKEND_URL` in `android/local.properties` if not using emulator default:
+Override the API base URL in `android/local.properties` if needed:
 
 ```properties
 BACKEND_URL=http://10.0.2.2:8000
 ```
 
-## Environment Variables (Backend)
+The emulator maps `10.0.2.2` to the host loopback interface.
 
-Common keys used by backend modules:
-
-- `GEMINI_API_KEY` — required for real LLM blueprint and brief generation
-- `GITHUB_TOKEN` — required for publishing notebooks as Colab-ready Gists
-- `HUGGINGFACE_TOKEN` — improves dataset metadata fetch
-- `KAGGLE_USERNAME` / `KAGGLE_KEY` — Kaggle dataset search
-- `TELEGRAM_BOT_TOKEN` — enables real two-way Telegram bot
-- `ENABLE_PATENTS_REAL`, `ENABLE_STARTUPS_REAL`, `ENABLE_SOCIAL_REAL`, `ENABLE_BLOG_REAL`, `ALLOW_SIMULATED_SOURCES` — ingestion source switches
-- `DB_BACKEND=postgres`, `POSTGRES_DSN`, `STATE_STORE_BACKEND=redis`, `REDIS_URL`, `MESSAGE_BUS_BACKEND=kafka_mirror`, `KAFKA_BOOTSTRAP_SERVERS` — infra wiring (use `docker-compose.yml`)
-
-`TELEGRAM_CHAT_ID` is no longer required: the bot persists subscribers (chat ids) via `/start` in the `telegram_subscribers` table and broadcasts alerts to all of them.
-
-## Telegram Bot (production)
-
-The backend embeds a `python-telegram-bot` long-polling client started in the FastAPI lifespan. The bot supports:
-
-- `/start` — subscribe and show command help
-- `/help` — show command help
-- `/status` — live platform stats (signals, trends, pipelines, agent status)
-- `/trends` — top 5 emerging techniques
-- `/pipelines` — recent pipelines (with Colab links)
-- `/unsubscribe` — stop receiving alerts
-
-Outbound alerts (high-impact trend, ingestion summary, training pipeline ready) are broadcast to every subscriber. There is no mock fallback: when `TELEGRAM_BOT_TOKEN` is unset the bot is a no-op; when set, every send is a real Telegram API call.
-
-To verify: open the bot in Telegram, send `/start`, then `python backend/scripts/check_subscribers.py` to confirm persistence.
-
-## Colab pipeline publishing
-
-`POST /api/pipelines/generate` builds a real `.ipynb` notebook (split into NLP / vision / audio / tabular cells) and pushes it to a public GitHub Gist via `GITHUB_TOKEN`. The response includes:
-
-- `colab_url` — `https://colab.research.google.com/gist/<owner>/<gist_id>/<file>.ipynb`
-- `metrics.colab_gist` — `{owner, gist_id, gist_url, filename}`
-
-If `GITHUB_TOKEN` is missing or GitHub is unreachable, the pipeline still returns a generic Colab create URL so callers always have a usable handle.
-
-## Testing
-
-Backend tests:
+### Full local stack (optional)
 
 ```bash
-cd backend
-pytest -q
-```
-
-CI workflows are defined in `.github/workflows/` for backend and Android builds.
-
-Android unit tests are under:
-
-- `android/app/src/test/`
-- `android/core/skills/src/test/`
-
-Android instrumentation scaffolding is under:
-
-- `android/app/src/androidTest/`
-
-## Pipeline Dataset Preview API
-
-Before generating a pipeline, you can preview ranked dataset candidates:
-
-- `POST /api/pipelines/dataset-candidates`
-
-Request body:
-
-```json
-{
-  "technique_name": "Sparse Attention",
-  "description": "Long-context NLP models",
-  "task_type": "text-classification",
-  "top_k": 8
-}
-```
-
-## Local Distributed Infra (Docker)
-
-Bring up PostgreSQL + Redis + Kafka locally:
-
-```bash
-cd ..
 docker compose up -d
 ```
 
-Then configure backend using `backend/.env.example` values (copy to `backend/.env`).
+Then align `backend/.env` with `backend/.env.example` (Postgres, Redis, Kafka). Kafka UI is typically exposed at `http://localhost:8085` when enabled in your compose profile.
 
-Useful local endpoints:
+---
 
-- Kafka UI: `http://localhost:8085`
-- Postgres: `localhost:5432`
-- Redis: `localhost:6379`
+## Configuration (backend)
+
+| Variable | Role |
+| --- | --- |
+| `GEMINI_API_KEY` | Real LLM output for blueprints and briefs |
+| `USE_MOCK_LLM` | Set `false` in production or hosted demos |
+| `GITHUB_TOKEN` | Gist publishing for Colab-linked notebooks |
+| `HUGGINGFACE_TOKEN` | Dataset metadata enrichment |
+| `KAGGLE_USERNAME` / `KAGGLE_KEY` | Kaggle dataset search |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot (long polling; single active poller per token) |
+| `TELEGRAM_ENABLE_POLLING` | Default `true`; set `false` on secondary instances to avoid `getUpdates` conflicts |
+| `DB_BACKEND`, `POSTGRES_*`, `REDIS_URL`, `MESSAGE_BUS_BACKEND`, `KAFKA_*` | Optional distributed backends via Docker |
+
+Subscribers are persisted when users send `/start` to the bot; `TELEGRAM_CHAT_ID` is optional for broadcasts.
+
+---
+
+## Telegram bot (commands)
+
+| Command | Behaviour |
+| --- | --- |
+| `/start` | Subscribe and show help |
+| `/help` | Command reference |
+| `/status` | Live platform statistics |
+| `/trends` | Top ranked techniques |
+| `/pipelines` | Recent pipelines with Colab links where available |
+| `/unsubscribe` | Remove subscription |
+
+Outbound alerts cover high-impact trends, ingestion summaries, and pipeline completion. With no token configured, delivery is a no-op.
+
+---
+
+## Colab pipeline publishing
+
+`POST /api/pipelines/generate` materialises a structured notebook and, when `GITHUB_TOKEN` is set, publishes a public Gist. The JSON response includes `colab_url` and structured `metrics.colab_gist`. If GitHub is unavailable, the API still returns a usable Colab entry path.
+
+---
+
+## Testing
+
+| Layer | Command / location |
+| --- | --- |
+| Backend unit and integration | `cd backend && pytest -q` |
+| Android unit | `android/app/src/test/`, `android/core/skills/src/test/` |
+| Android instrumented | `android/app/src/androidTest/` |
+| CI | Workflows under `.github/workflows/` |
+
+---
+
+## Dataset preview API
+
+`POST /api/pipelines/dataset-candidates` accepts a technique name, description, `task_type`, and `top_k` to return ranked dataset suggestions before full pipeline generation.
+
+---
 
 ## Troubleshooting
 
-- Android emulator cannot reach `localhost` on host directly; use `http://10.0.2.2:8000`.
-- If backend URL differs, set `BACKEND_URL` in `android/local.properties`.
-- Start backend before launching app flows that fetch stats/trends.
-- If Android local build fails with `IllegalArgumentException: 25`, your runtime JDK is too new for current Gradle Kotlin DSL tooling; use JDK 17/21 for Gradle execution.
+| Symptom | Mitigation |
+| --- | --- |
+| Emulator cannot reach host `localhost` | Use `http://10.0.2.2:8000` in `BACKEND_URL` |
+| Custom backend URL | Set `BACKEND_URL` in `android/local.properties` and rebuild |
+| Gradle JDK errors | Use Temurin JDK 17 or 21 for the Gradle daemon |
+| Telegram `409 Conflict` | Only one process may call `getUpdates` per bot token; stop duplicate backends or set `TELEGRAM_ENABLE_POLLING=false` on non-primary hosts |
+| Telegram timeout on cold start | Hosted deployments retry with extended HTTP timeouts; ensure `TELEGRAM_BOT_TOKEN` is set as a Space secret |
+
+---
+
+## Licence and attribution
+
+Submit your licence choice in the repository settings or a root `LICENSE` file if required by the hackathon. VectorMind integrates third-party APIs and models (Gemini, Hugging Face, Telegram, GitHub, Kaggle) subject to their respective terms of use.

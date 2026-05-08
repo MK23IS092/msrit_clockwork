@@ -16,6 +16,9 @@ backend/data/*.db
 backend/data/*.sqlite
 backend/data/*.sqlite3
 
+# Local-only git history rewrite helper (never commit)
+.git_rewrite_env.sh
+
 # IDE
 .idea/
 .vscode/
