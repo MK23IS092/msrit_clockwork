@@ -25,18 +25,29 @@ The walkthrough below plays directly in the GitHub README in most desktop browse
 
 | Deliverable | Access |
 | --- | --- |
-| **Android APK** (debug build, hosted backend URL baked in at compile time) | [Direct install (raw)](https://github.com/MK23IS092/msrit_clockwork/raw/main/dist/vectormind-judges.apk) |
-| **Full source snapshot** (ZIP, includes repository tree and deliverables) | [v1.0.0 source archive](https://github.com/MK23IS092/msrit_clockwork/archive/refs/tags/v1.0.0.zip) |
+| **Android APK** (signed `v1.0.1` release; hosted backend URL baked in at compile time) | [Download `vectormind-judges.apk` (v1.0.1)](https://github.com/MK23IS092/msrit_clockwork/releases/download/v1.0.1/vectormind-judges.apk) |
+| **APK (in-tree mirror)** | [`dist/vectormind-judges.apk`](https://github.com/MK23IS092/msrit_clockwork/raw/main/dist/vectormind-judges.apk) |
+| **Full source snapshot** (ZIP, includes repository tree and deliverables) | [v1.0.1 source archive](https://github.com/MK23IS092/msrit_clockwork/archive/refs/tags/v1.0.1.zip) |
 | **Demo video** (MP4) | [Stream / download (raw)](https://raw.githubusercontent.com/MK23IS092/msrit_clockwork/main/product_demo.mp4) |
 | **Presentation** | [Clockwork_MSRIT.pdf](./Clockwork_MSRIT.pdf) |
 | **AI disclosure** | [OpenClaw_AI_Disclosure (1) (1).docx](./OpenClaw_AI_Disclosure%20%281%29%20%281%29.docx) |
+| **Telegram bot** | [t.me/VectormindsBot](https://t.me/VectormindsBot) |
+| **Live backend** | [teletubbies-zamzung.hf.space](https://teletubbies-zamzung.hf.space) |
 | **This README** | [README.md](./README.md) |
 
 ### Installing the APK (Android)
 
-1. Open the **Direct install (raw)** link on the device.
+1. On the target device, open the [v1.0.1 APK download](https://github.com/MK23IS092/msrit_clockwork/releases/download/v1.0.1/vectormind-judges.apk) link.
 2. Approve installation from the browser or file manager when prompted (unknown sources).
 3. Launch the app. No manual API URL entry is required for the judge build; it targets the hosted backend below.
+
+### Trying the Telegram bot
+
+| Step | Action |
+| --- | --- |
+| 1 | Open [t.me/VectormindsBot](https://t.me/VectormindsBot) on a device that has Telegram installed. |
+| 2 | Tap **Start**, or send `/start` to subscribe and see the command menu. |
+| 3 | Use `/status`, `/trends`, `/pipelines`, `/help`, or `/unsubscribe`. Outbound alerts (high-impact trends, ingestion summaries, pipeline completions) broadcast automatically to subscribers. |
 
 ---
 
@@ -122,18 +133,20 @@ Subscribers are persisted when users send `/start` to the bot; `TELEGRAM_CHAT_ID
 
 ---
 
-## Telegram bot (commands)
+## Telegram bot
+
+The production bot is live at [**t.me/VectormindsBot**](https://t.me/VectormindsBot). Tap the link on any Telegram client and press **Start** to subscribe.
 
 | Command | Behaviour |
 | --- | --- |
 | `/start` | Subscribe and show help |
 | `/help` | Command reference |
-| `/status` | Live platform statistics |
-| `/trends` | Top ranked techniques |
+| `/status` | Live platform statistics (signals, trends, pipelines, agent state) |
+| `/trends` | Top ranked emerging techniques |
 | `/pipelines` | Recent pipelines with Colab links where available |
 | `/unsubscribe` | Remove subscription |
 
-Outbound alerts cover high-impact trends, ingestion summaries, and pipeline completion. With no token configured, delivery is a no-op.
+Outbound alerts (high-impact trends, ingestion summaries, pipeline completions) broadcast to every subscriber. With no token configured, delivery is a no-op; the hosted Space ships with `TELEGRAM_BOT_TOKEN` already wired through Space secrets.
 
 ---
 
